@@ -81,6 +81,38 @@ Android 12/13 device, one Android 14+ device (cycle count available), and at lea
 vendor-specific property behaviour is exercised. Tablets are worth testing for the responsive layouts
 and for hardware that lacks telephony.
 
+
+## Regenerating the screenshots
+
+The images in `docs/screenshots/` are rendered on the JVM — no emulator and no device are needed.
+They are real renderings of the shipping composables, driven by
+`app/src/test/kotlin/com/verifydeviceinfo/ScreenshotTest.kt`.
+
+```bash
+export ROBORAZZI_RECORD=true
+./gradlew :app:testDebugUnitTest --tests "com.verifydeviceinfo.ScreenshotTest"
+cp app/build/outputs/roborazzi/*.png docs/screenshots/
+```
+
+Robolectric needs its `android-all-instrumented` runtime jar for the SDK under test (API 35), which
+it normally downloads from Maven Central on first run. If the test JVM cannot reach Maven Central —
+a locked-down CI runner, for example — fetch the jar yourself and point Robolectric at the directory:
+
+```bash
+mkdir -p ~/robolectric-deps
+curl -LO --output-dir ~/robolectric-deps \
+  https://repo1.maven.org/maven2/org/robolectric/android-all-instrumented/15-robolectric-12650502-i7/android-all-instrumented-15-robolectric-12650502-i7.jar
+export ROBOLECTRIC_DEPENDENCY_DIR=~/robolectric-deps
+```
+
+`ROBOLECTRIC_DEPENDENCY_DIR` switches the test task to Robolectric's offline mode. Both environment
+variables are optional and are read at build time, so no paths or credentials are baked into the
+build file.
+
+To add a screen, write another `@Test` in `ScreenshotTest.kt` and call `capture("08-name") { … }`
+with the composable. The fixture data lives in the same file, so screenshots never depend on a real
+device.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |

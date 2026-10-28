@@ -71,6 +71,33 @@ android {
     sourceSets["test"].java.srcDirs("src/test/kotlin")
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
+        // Screenshot rendering runs in a forked JVM that needs the same proxy as Gradle.
+        // Values come from the environment, so no credentials live in this file.
+        unitTests.all { task ->
+            // Optional offline Robolectric runtime, for environments where the test JVM cannot
+            // reach Maven Central (CI behind a proxy, for example).
+            System.getenv("ROBOLECTRIC_DEPENDENCY_DIR")?.let { dir ->
+                task.systemProperty("robolectric.offline", "true")
+                task.systemProperty("robolectric.dependency.dir", dir)
+            }
+            System.getenv("ROBORAZZI_RECORD")?.let { record ->
+                task.systemProperty("roborazzi.test.record", record)
+            }
+            task.systemProperty("java.io.tmpdir", layout.buildDirectory.dir("tmp").get().asFile.absolutePath)
+            listOf("http", "https").forEach { scheme ->
+                val raw = System.getenv("${scheme.uppercase()}_PROXY") ?: return@forEach
+                val withoutScheme = raw.substringAfter("://")
+                val hostPort = withoutScheme.substringAfterLast("@")
+                val credentials = withoutScheme.substringBeforeLast("@")
+                task.systemProperty("$scheme.proxyHost", hostPort.substringBefore(":"))
+                task.systemProperty("$scheme.proxyPort", hostPort.substringAfter(":"))
+                if (credentials.contains(":")) {
+                    task.systemProperty("$scheme.proxyUser", credentials.substringBefore(":"))
+                    task.systemProperty("$scheme.proxyPassword", credentials.substringAfter(":"))
+                }
+            }
+        }
     }
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/LICENSE*")
@@ -96,7 +123,16 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.26.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.26.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+    // Declares the host ComponentActivity that Compose UI tests (and screenshot rendering) launch.
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

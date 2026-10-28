@@ -13,6 +13,30 @@ software cannot establish that.
 
 ---
 
+## Screenshots
+
+<p>
+<img src="docs/screenshots/01-dashboard.png" width="270" alt="Dashboard" />
+<img src="docs/screenshots/02-authenticity.png" width="270" alt="Authenticity report" />
+<img src="docs/screenshots/03-parts.png" width="270" alt="Parts and repairs" />
+</p>
+<p>
+<img src="docs/screenshots/04-specifications.png" width="270" alt="Specifications A-Z" />
+<img src="docs/screenshots/05-security.png" width="270" alt="Security and software" />
+<img src="docs/screenshots/06-battery.png" width="270" alt="Battery and performance" />
+</p>
+<p>
+<img src="docs/screenshots/07-diagnostics.png" width="270" alt="Diagnostics" />
+</p>
+
+These are renderings of the shipping composables, produced on the JVM by Robolectric + Roborazzi
+(`app/src/test/kotlin/com/verifydeviceinfo/ScreenshotTest.kt`) — not captures from a phone, because
+this project was built without access to a device or emulator. The values shown come from the test
+fixture, not from a real handset. Regeneration instructions are in
+[docs/BUILDING.md](docs/BUILDING.md#regenerating-the-screenshots).
+
+---
+
 ## What it does
 
 ### Complete device information
