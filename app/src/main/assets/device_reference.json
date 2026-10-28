@@ -1,0 +1,591 @@
+{
+  "schemaVersion": 1,
+  "curatedOn": "2026-10-28",
+  "notes": "Curated from manufacturer specification pages. Values are the published global or India-market figures and may differ for regional variants. Reference data is a comparison baseline only: a match does not prove authenticity and a mismatch does not prove counterfeiting.",
+  "devices": [
+    {
+      "modelPatterns": [
+        "SM-S911",
+        "Galaxy S23"
+      ],
+      "brand": "Samsung",
+      "marketingName": "Galaxy S23",
+      "soc": "Snapdragon 8 Gen 2 SM8550",
+      "socManufacturer": "Qualcomm",
+      "releaseDate": "2023-02-17",
+      "ramOptionsGb": [
+        8
+      ],
+      "storageOptionsGb": [
+        128,
+        256,
+        512
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2340,
+      "densityDpi": 420,
+      "refreshRateHz": 120,
+      "rearCameraCount": 3,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 50.0,
+      "batteryMah": 3900,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.samsung.com/in/smartphones/galaxy-s23/specs/",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Samsung official specifications"
+    },
+    {
+      "modelPatterns": [
+        "SM-S901",
+        "Galaxy S22"
+      ],
+      "brand": "Samsung",
+      "marketingName": "Galaxy S22",
+      "soc": "Snapdragon 8 Gen 1 SM8450 / Exynos 2200",
+      "socManufacturer": "Qualcomm / Samsung",
+      "releaseDate": "2022-02-25",
+      "ramOptionsGb": [
+        8
+      ],
+      "storageOptionsGb": [
+        128,
+        256
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2340,
+      "densityDpi": 420,
+      "refreshRateHz": 120,
+      "rearCameraCount": 3,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 50.0,
+      "batteryMah": 3700,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.samsung.com/in/smartphones/galaxy-s22/specs/",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Samsung official specifications"
+    },
+    {
+      "modelPatterns": [
+        "SM-A546",
+        "Galaxy A54"
+      ],
+      "brand": "Samsung",
+      "marketingName": "Galaxy A54 5G",
+      "soc": "Exynos 1380 S5E8835",
+      "socManufacturer": "Samsung",
+      "releaseDate": "2023-03-24",
+      "ramOptionsGb": [
+        8
+      ],
+      "storageOptionsGb": [
+        128,
+        256
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2340,
+      "densityDpi": 420,
+      "refreshRateHz": 120,
+      "rearCameraCount": 3,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 50.0,
+      "batteryMah": 5000,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.samsung.com/in/smartphones/galaxy-a54-5g/specs/",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Samsung official specifications"
+    },
+    {
+      "modelPatterns": [
+        "SM-M146",
+        "Galaxy M14"
+      ],
+      "brand": "Samsung",
+      "marketingName": "Galaxy M14 5G",
+      "soc": "Exynos 1330 S5E8535",
+      "socManufacturer": "Samsung",
+      "releaseDate": "2023-03-08",
+      "ramOptionsGb": [
+        4,
+        6
+      ],
+      "storageOptionsGb": [
+        128
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2408,
+      "densityDpi": 420,
+      "refreshRateHz": 90,
+      "rearCameraCount": 3,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 50.0,
+      "batteryMah": 6000,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.samsung.com/in/smartphones/galaxy-m/galaxy-m14-5g/specs/",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Samsung official specifications"
+    },
+    {
+      "modelPatterns": [
+        "GVU6C",
+        "G9S9B",
+        "Pixel 7"
+      ],
+      "brand": "Google",
+      "marketingName": "Pixel 7",
+      "soc": "Google Tensor G2",
+      "socManufacturer": "Google",
+      "releaseDate": "2022-10-13",
+      "ramOptionsGb": [
+        8
+      ],
+      "storageOptionsGb": [
+        128,
+        256
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2400,
+      "densityDpi": 420,
+      "refreshRateHz": 90,
+      "rearCameraCount": 2,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 50.0,
+      "batteryMah": 4355,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://store.google.com/product/pixel_7_specs",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Google official specifications"
+    },
+    {
+      "modelPatterns": [
+        "GKWS6",
+        "GZPF0",
+        "Pixel 8"
+      ],
+      "brand": "Google",
+      "marketingName": "Pixel 8",
+      "soc": "Google Tensor G3",
+      "socManufacturer": "Google",
+      "releaseDate": "2023-10-12",
+      "ramOptionsGb": [
+        8
+      ],
+      "storageOptionsGb": [
+        128,
+        256
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2400,
+      "densityDpi": 420,
+      "refreshRateHz": 120,
+      "rearCameraCount": 2,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 50.0,
+      "batteryMah": 4575,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://store.google.com/product/pixel_8_specs",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Google official specifications"
+    },
+    {
+      "modelPatterns": [
+        "GX7AS",
+        "GB17L",
+        "Pixel 6a"
+      ],
+      "brand": "Google",
+      "marketingName": "Pixel 6a",
+      "soc": "Google Tensor GS101",
+      "socManufacturer": "Google",
+      "releaseDate": "2022-07-21",
+      "ramOptionsGb": [
+        6
+      ],
+      "storageOptionsGb": [
+        128
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2400,
+      "densityDpi": 420,
+      "refreshRateHz": 60,
+      "rearCameraCount": 2,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 12.2,
+      "batteryMah": 4410,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://store.google.com/product/pixel_6a_specs",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Google official specifications"
+    },
+    {
+      "modelPatterns": [
+        "22111317I",
+        "Redmi Note 12"
+      ],
+      "brand": "Xiaomi",
+      "marketingName": "Redmi Note 12",
+      "soc": "Snapdragon 685 SM6225",
+      "socManufacturer": "Qualcomm",
+      "releaseDate": "2023-01-11",
+      "ramOptionsGb": [
+        4,
+        6,
+        8
+      ],
+      "storageOptionsGb": [
+        128,
+        256
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2400,
+      "densityDpi": 420,
+      "refreshRateHz": 120,
+      "rearCameraCount": 3,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 48.0,
+      "batteryMah": 5000,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.mi.com/in/product/redmi-note-12/specs/",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Xiaomi official specifications"
+    },
+    {
+      "modelPatterns": [
+        "Redmi Note 13 5G"
+      ],
+      "brand": "Xiaomi",
+      "marketingName": "Redmi Note 13 5G",
+      "soc": "Dimensity 6080 MT6833",
+      "socManufacturer": "MediaTek",
+      "releaseDate": "2024-01-04",
+      "ramOptionsGb": [
+        6,
+        8,
+        12
+      ],
+      "storageOptionsGb": [
+        128,
+        256
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2400,
+      "densityDpi": 420,
+      "refreshRateHz": 120,
+      "rearCameraCount": 3,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 108.0,
+      "batteryMah": 5000,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.mi.com/in/product/redmi-note-13-5g/specs/",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Xiaomi official specifications"
+    },
+    {
+      "modelPatterns": [
+        "22101320G",
+        "POCO X5 Pro"
+      ],
+      "brand": "Xiaomi",
+      "marketingName": "POCO X5 Pro 5G",
+      "soc": "Snapdragon 778G SM7325",
+      "socManufacturer": "Qualcomm",
+      "releaseDate": "2023-02-06",
+      "ramOptionsGb": [
+        6,
+        8
+      ],
+      "storageOptionsGb": [
+        128,
+        256
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2400,
+      "densityDpi": 420,
+      "refreshRateHz": 120,
+      "rearCameraCount": 3,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 108.0,
+      "batteryMah": 5000,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.po.co/global/product/poco-x5-pro-5g/specs/",
+      "sourceDate": "2026-10-28",
+      "sourceName": "POCO official specifications"
+    },
+    {
+      "modelPatterns": [
+        "CPH2449",
+        "CPH2447",
+        "OnePlus 11"
+      ],
+      "brand": "OnePlus",
+      "marketingName": "OnePlus 11",
+      "soc": "Snapdragon 8 Gen 2 SM8550",
+      "socManufacturer": "Qualcomm",
+      "releaseDate": "2023-02-07",
+      "ramOptionsGb": [
+        8,
+        16
+      ],
+      "storageOptionsGb": [
+        128,
+        256
+      ],
+      "displayWidthPx": 1440,
+      "displayHeightPx": 3216,
+      "densityDpi": 560,
+      "refreshRateHz": 120,
+      "rearCameraCount": 3,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 50.0,
+      "batteryMah": 5000,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.oneplus.in/11/specs",
+      "sourceDate": "2026-10-28",
+      "sourceName": "OnePlus official specifications"
+    },
+    {
+      "modelPatterns": [
+        "CPH2467",
+        "Nord CE 3 Lite"
+      ],
+      "brand": "OnePlus",
+      "marketingName": "OnePlus Nord CE 3 Lite 5G",
+      "soc": "Snapdragon 695 SM6375",
+      "socManufacturer": "Qualcomm",
+      "releaseDate": "2023-04-04",
+      "ramOptionsGb": [
+        8
+      ],
+      "storageOptionsGb": [
+        128
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2400,
+      "densityDpi": 420,
+      "refreshRateHz": 120,
+      "rearCameraCount": 3,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 108.0,
+      "batteryMah": 5000,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.oneplus.in/nord-ce-3-lite/specs",
+      "sourceDate": "2026-10-28",
+      "sourceName": "OnePlus official specifications"
+    },
+    {
+      "modelPatterns": [
+        "RMX3782",
+        "Narzo 60"
+      ],
+      "brand": "Realme",
+      "marketingName": "Realme Narzo 60 5G",
+      "soc": "Dimensity 6020 MT6833",
+      "socManufacturer": "MediaTek",
+      "releaseDate": "2023-07-06",
+      "ramOptionsGb": [
+        8
+      ],
+      "storageOptionsGb": [
+        128,
+        256
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2400,
+      "densityDpi": 420,
+      "refreshRateHz": 90,
+      "rearCameraCount": 2,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 64.0,
+      "batteryMah": 5000,
+      "expectedSensors": [
+        "accelerometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.realme.com/in/realme-narzo-60-5g/specs",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Realme official specifications"
+    },
+    {
+      "modelPatterns": [
+        "moto edge 40",
+        "XT2303"
+      ],
+      "brand": "Motorola",
+      "marketingName": "Motorola Edge 40",
+      "soc": "Dimensity 8020 MT6877",
+      "socManufacturer": "MediaTek",
+      "releaseDate": "2023-05-04",
+      "ramOptionsGb": [
+        8
+      ],
+      "storageOptionsGb": [
+        256
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2400,
+      "densityDpi": 420,
+      "refreshRateHz": 144,
+      "rearCameraCount": 2,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 50.0,
+      "batteryMah": 4400,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.motorola.in/smartphones-motorola-edge-40/p",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Motorola official specifications"
+    },
+    {
+      "modelPatterns": [
+        "V2250",
+        "V27 Pro"
+      ],
+      "brand": "Vivo",
+      "marketingName": "Vivo V27 Pro",
+      "soc": "Dimensity 8200 MT6896",
+      "socManufacturer": "MediaTek",
+      "releaseDate": "2023-03-01",
+      "ramOptionsGb": [
+        8,
+        12
+      ],
+      "storageOptionsGb": [
+        128,
+        256
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2400,
+      "densityDpi": 420,
+      "refreshRateHz": 120,
+      "rearCameraCount": 3,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 50.0,
+      "batteryMah": 4600,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://www.vivo.com/in/products/v27pro",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Vivo official specifications"
+    },
+    {
+      "modelPatterns": [
+        "A065",
+        "Nothing Phone (2)"
+      ],
+      "brand": "Nothing",
+      "marketingName": "Nothing Phone (2)",
+      "soc": "Snapdragon 8+ Gen 1 SM8475",
+      "socManufacturer": "Qualcomm",
+      "releaseDate": "2023-07-11",
+      "ramOptionsGb": [
+        8,
+        12
+      ],
+      "storageOptionsGb": [
+        128,
+        256,
+        512
+      ],
+      "displayWidthPx": 1080,
+      "displayHeightPx": 2412,
+      "densityDpi": 420,
+      "refreshRateHz": 120,
+      "rearCameraCount": 2,
+      "frontCameraCount": 1,
+      "mainCameraMegapixels": 50.0,
+      "batteryMah": 4700,
+      "expectedSensors": [
+        "accelerometer",
+        "gyroscope",
+        "magnetometer",
+        "proximity",
+        "light"
+      ],
+      "sourceUrl": "https://nothing.tech/products/phone-2",
+      "sourceDate": "2026-10-28",
+      "sourceName": "Nothing official specifications"
+    }
+  ]
+}

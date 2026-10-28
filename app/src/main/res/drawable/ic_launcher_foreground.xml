@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Stylised handset with a scan line, drawn as paths so no vendor artwork is used. -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M40,26h28a6,6 0,0 1,6 6v44a6,6 0,0 1,-6 6h-28a6,6 0,0 1,-6 -6v-44a6,6 0,0 1,6 -6zM40,32v44h28v-44z" />
+    <path
+        android:fillColor="#22C55E"
+        android:pathData="M44,44h20v4h-20zM44,54h20v4h-20zM44,64h12v4h-12z" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M36,48h36v2h-36z" />
+</vector>
