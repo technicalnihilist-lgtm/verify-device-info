@@ -26,7 +26,7 @@ build and tests green before committing.
 - [x] **A1. Precompile the regex in `AnalysisSupport.normalise`.** `Regex("[^a-z0-9]")` is compiled on
   every call and this function runs in tight loops over model, brand and SoC strings. Hoist it to a
   `private val`. *Verify:* unit tests unchanged; no behaviour difference.
-- [ ] **A2. Replace `String.format` in `Formatters`.** `Formatters.bytes` and friends allocate a
+- [x] **A2. Replace `String.format` in `Formatters`.** `Formatters.bytes` and friends allocate a
   `Formatter` per call and are used in list rendering. Implement the decimal formatting by hand.
   *Verify:* add unit tests pinning the exact output strings before changing anything.
 - [ ] **A3. Cache the normalised reference patterns.** `AssetReferenceRepository.match` normalises every
