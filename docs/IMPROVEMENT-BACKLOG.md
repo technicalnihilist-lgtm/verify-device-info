@@ -122,3 +122,66 @@ Not more features and not a prettier screen. Faster to first result, smaller APK
 scan, no leaks, no silent failures, no crash on a weird device, and a test that would have caught the
 bug. If a day produces one real fix that survives review, that is a good day — ten cosmetic commits
 would be worse than one honest one.
+
+## H. Data accuracy and platform coverage
+
+- [ ] **H1. Vendor market-name fallbacks.** Read `ro.product.marketname` across the `odm`/`vendor`
+  namespaces and pick the first non-empty; some OEMs only populate one.
+- [ ] **H2. SoC manufacturer cross-check.** Compare `Build.SOC_MANUFACTURER` with the vendor implied by
+  `ro.soc.model` and report a mismatch as `UNVERIFIED`, not as a warning.
+- [ ] **H3. Battery health code 0 means unknown, not good.** `BATTERY_HEALTH_UNKNOWN` is currently
+  scored like a healthy pack; treat it as missing evidence.
+- [ ] **H4. De-duplicate wake-up sensors.** `getSensorList(TYPE_ALL)` returns both variants on many
+  devices, inflating the count. Count logical sensors once.
+- [ ] **H5. Megapixel source precedence.** When the stream configuration and the pixel array disagree,
+  document which one is reported and why, and expose the other value.
+- [ ] **H6. Replace deprecated `getRealMetrics`.** Use `WindowMetrics` on API 30+ with the old path as
+  fallback; behaviour must stay identical on every API level.
+- [ ] **H7. VPN-aware transport reporting.** With a VPN active, report the underlying transport as well
+  as the VPN instead of only "VPN".
+- [ ] **H8. Count packages once.** `getInstalledPackages` is called and walked twice in places; derive
+  system and user counts from a single pass.
+- [ ] **H9. Verified-boot fallbacks.** Fall back to `ro.boot.veritymode` when
+  `ro.boot.verifiedbootstate` is absent, and say which property answered.
+- [ ] **H10. Locale audit.** Every `String.format` must pass `Locale.US`; a device set to Arabic or
+  Hindi digits currently renders numbers inconsistently in the report.
+- [ ] **H11. Per-volume storage.** Use `StorageManager` to report internal versus adoptable volume free
+  space instead of only the data partition.
+- [ ] **H12. Per-core CPU frequencies.** Read max frequency for every core, not just `cpu0`, and report
+  the cluster layout when it is readable.
+- [ ] **H13. Elapsed-realtime distinction.** Report both `elapsedRealtime` (includes deep sleep) and
+  `uptimeMillis` (awake only) so uptime is unambiguous.
+- [ ] **H14. Reference codenames.** Add codename patterns to the reference entries so matching works
+  for builds whose `Build.MODEL` is a carrier variant.
+
+## I. Tooling and tests that protect the work
+
+- [ ] **I1. Reference-loader test.** Feed a malformed entry and assert the rest of the set still loads.
+- [ ] **I2. Formatter edge-case tests.** Zero, negative, exactly 1023/1024, and very large byte counts.
+- [ ] **I3. Status exhaustiveness guard.** A unit test asserting every `DiagnosticStatus` and
+  `ComponentState` maps to a colour and a label, so a future enum value cannot ship unrendered.
+- [ ] **I4. `tools/check-no-ui-change.sh`.** Diffs `ui/` and `res/` against a reference commit and exits
+  non-zero if they changed — the hard rule becomes enforceable instead of aspirational.
+- [ ] **I5. `tools/measure.sh`.** Records APK size, method count and a timed debug build into
+  `docs/PERFORMANCE.md`, so every claim of "faster" has a number behind it.
+- [ ] **I6. Redaction test.** Assert that a report with a serial number, a Bluetooth name and a
+  certificate digest contains none of them when `redacted = true`.
+- [ ] **I7. GitHub Actions CI.** Build and test on every push so a regression is caught by the
+  repository itself, not only by a nightly run.
+- [ ] **I8. Lint triage.** Run `gradle lint`, fix real findings, suppress the rest with a written reason.
+- [ ] **I9. Screenshot non-blank assertion.** Fail the render test if an image comes back uniform.
+- [ ] **I10. Dependency audit.** Record the resolved dependency tree and flag anything unexpectedly
+  large.
+
+---
+
+## When the list runs out
+
+If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
+
+1. Re-read the code with the same lens as the sections above — allocations on the scan path, Binder
+   calls that could be cached, error paths that could be silent, missing tests around a hot path.
+2. Add **specific, verifiable** items to this file (name the function and the change), then implement
+   the first one in the same run.
+3. Never add an item that requires a visible change. Those belong to a future design pass, not to this
+   one.
