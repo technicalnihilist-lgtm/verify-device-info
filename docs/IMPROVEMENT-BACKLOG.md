@@ -29,8 +29,11 @@ build and tests green before committing.
 - [x] **A2. Replace `String.format` in `Formatters`.** `Formatters.bytes` and friends allocate a
   `Formatter` per call and are used in list rendering. Implement the decimal formatting by hand.
   *Verify:* add unit tests pinning the exact output strings before changing anything.
-- [ ] **A3. Cache the normalised reference patterns.** `AssetReferenceRepository.match` normalises every
-  pattern on every scan. Normalise once at load time.
+- [x] **A3. Cache the normalised reference patterns.** `AssetReferenceRepository.match` normalises every
+  pattern on every scan. Normalise once at load time. *Done:* brand and pattern keys are normalised
+  once when the asset is parsed; `match` now normalises only the three query strings and walks the
+  pre-built index, which also removes the per-call `Triple` list and sort. Same winner on every
+  query; 124–324 µs → 2.5–3.4 µs per `match` in a standalone JVM benchmark over the bundled set.
 - [ ] **A4. Avoid rebuilding the identity blob per scan.** `DefaultAuthenticityEngine` lowercases and
   joins six strings on each run; build it once per call and reuse for all marker checks.
 - [ ] **A5. Reuse `Paint` objects in the PDF writer.** `PageWriter` allocates paints per instance but

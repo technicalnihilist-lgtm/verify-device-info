@@ -17,51 +17,82 @@ import java.util.Locale
  */
 class AssetReferenceRepository(private val context: Context) : ReferenceRepository {
 
-    private var cache: List<ReferenceDevice>? = null
+    /**
+     * A curated pattern, kept as the original string (that is what a [ReferenceMatch] reports)
+     * alongside its normalised key, so the normalisation happens once when the asset is loaded
+     * rather than on every scan.
+     */
+    private class PatternKey(val raw: String, val key: String)
+
+    /** A reference entry with its brand and pattern keys pre-normalised. */
+    private class Entry(
+        val device: ReferenceDevice,
+        val brandKey: String,
+        val patterns: List<PatternKey>
+    )
+
+    private var devices: List<ReferenceDevice>? = null
+    private var entries: List<Entry> = emptyList()
 
     override fun all(): List<ReferenceDevice> = load()
 
     override fun match(model: String, brand: String, device: String): ReferenceMatch? {
+        load()
         val normalisedModel = normalise(model)
         val normalisedDevice = normalise(device)
         val normalisedBrand = normalise(brand)
-        val candidates = load()
         // Prefer a brand match, then the longest pattern that occurs in the model string.
-        val matches = candidates.mapNotNull { deviceEntry ->
-            val pattern = deviceEntry.modelPatterns.firstOrNull { raw ->
-                val p = normalise(raw)
-                p.isNotEmpty() && (normalisedModel.contains(p) || normalisedDevice == p)
+        // Entries are visited in file order, so an exact tie keeps the earlier entry — the same
+        // winner a stable descending sort produced.
+        var bestDevice: ReferenceDevice? = null
+        var bestPattern: String? = null
+        var bestBrandMatches = false
+        var bestLength = -1
+        for (entry in entries) {
+            val pattern = entry.patterns.firstOrNull { candidate ->
+                candidate.key.isNotEmpty() &&
+                    (normalisedModel.contains(candidate.key) || normalisedDevice == candidate.key)
+            } ?: continue
+            val brandMatches = entry.brandKey == normalisedBrand
+            val better = when {
+                bestDevice == null -> true
+                brandMatches != bestBrandMatches -> brandMatches
+                else -> pattern.raw.length > bestLength
             }
-            if (pattern == null) null
-            else {
-                val brandMatches = normalise(deviceEntry.brand) == normalisedBrand
-                Triple(deviceEntry, pattern, brandMatches)
+            if (better) {
+                bestDevice = entry.device
+                bestPattern = pattern.raw
+                bestBrandMatches = brandMatches
+                bestLength = pattern.raw.length
             }
         }
-        val best = matches.sortedWith(
-            compareByDescending<Triple<ReferenceDevice, String, Boolean>> { it.third }
-                .thenByDescending { it.second.length }
-        ).firstOrNull() ?: return null
-        return ReferenceMatch(best.first, best.second)
+        val matched = bestDevice ?: return null
+        return ReferenceMatch(matched, bestPattern ?: return null)
     }
 
     override fun sourceSummary(): String =
         "Bundled reference set: ${load().size} models curated from manufacturer specification pages. " +
             "Entries record their own source URL and curation date."
 
-    private fun normalise(value: String): String =
-        value.uppercase(Locale.US).replace(Regex("[^A-Z0-9]"), "")
+    private fun normalise(value: String): String {
+        val upper = value.uppercase(Locale.US)
+        val out = StringBuilder(upper.length)
+        for (ch in upper) {
+            if ((ch in 'A'..'Z') || (ch in '0'..'9')) out.append(ch)
+        }
+        return out.toString()
+    }
 
     @Synchronized
     private fun load(): List<ReferenceDevice> {
-        cache?.let { return it }
+        devices?.let { return it }
         val parsed = mutableListOf<ReferenceDevice>()
         try {
             val json = context.assets.open("device_reference.json").bufferedReader().use { it.readText() }
             val root = JSONObject(json)
-            val devices = root.optJSONArray("devices") ?: JSONArray()
-            for (index in 0 until devices.length()) {
-                val obj = devices.getJSONObject(index)
+            val devicesJson = root.optJSONArray("devices") ?: JSONArray()
+            for (index in 0 until devicesJson.length()) {
+                val obj = devicesJson.getJSONObject(index)
                 parsed += ReferenceDevice(
                     modelPatterns = obj.optJSONArray("modelPatterns").toStringList(),
                     brand = obj.optString("brand"),
@@ -88,7 +119,16 @@ class AssetReferenceRepository(private val context: Context) : ReferenceReposito
         } catch (e: Exception) {
             // A missing or malformed asset degrades to "no reference data", never to a crash.
         }
-        cache = parsed
+        // Build the normalised index once, next to the parsed entries, so a scan only normalises
+        // the three strings it is asked about.
+        entries = parsed.map { device ->
+            Entry(
+                device = device,
+                brandKey = normalise(device.brand),
+                patterns = device.modelPatterns.map { PatternKey(it, normalise(it)) }
+            )
+        }
+        devices = parsed
         return parsed
     }
 
