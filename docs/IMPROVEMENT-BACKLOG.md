@@ -34,16 +34,27 @@ build and tests green before committing.
   once when the asset is parsed; `match` now normalises only the three query strings and walks the
   pre-built index, which also removes the per-call `Triple` list and sort. Same winner on every
   query; 124–324 µs → 2.5–3.4 µs per `match` in a standalone JVM benchmark over the bundled set.
-- [ ] **A4. Avoid rebuilding the identity blob per scan.** `DefaultAuthenticityEngine` lowercases and
-  joins six strings on each run; build it once per call and reuse for all marker checks.
-- [ ] **A5. Reuse `Paint` objects in the PDF writer.** `PageWriter` allocates paints per instance but
-  re-creates some per page; hoist to fields and verify the PDF still renders identically.
+- [x] **A4. Avoid rebuilding the identity blob per scan.** `DefaultAuthenticityEngine` lowercases and
+  joins six strings on each run; build it once per call and reuse for all marker checks. *Done:*
+  already the case — `identityBlob` is built once per `analyze` call and shared by the marker scan
+  and the evidence it emits; nothing to change.
+- [x] **A5. Reuse `Paint` objects in the PDF writer.** `PageWriter` allocates paints per instance but
+  re-creates some per page; hoist to fields and verify the PDF still renders identically. *Done:*
+  already the case — all six paints (`title`, `section`, `body`, `small`, `label`, `rule`) are
+  instance fields and nothing is allocated per page; nothing to change. (Note for a later pass:
+  `finishPage` mutates `smallPaint.textSize` for the footer and never restores it, so small text on
+  page 2+ renders at 7.5pt instead of 8pt. Fixing it would change the rendered PDF, so it needs a
+  deliberate decision, not a drive-by edit.)
 
 ## B. Correctness — real bugs and edge cases
 
-- [ ] **B1. Prune old report files.** `FileDiagnosticHistory` caps the *index* at 50 entries but never
+- [x] **B1. Prune old report files.** `FileDiagnosticHistory` caps the *index* at 50 entries but never
   deletes the JSON files in `history/reports/`, so storage grows forever. Delete reports that fall out
-  of the index.
+  of the index. *Done:* `save` now writes the trimmed index and then deletes the report files whose id
+  is no longer in it (`staleReportFiles`, pure and unit-tested). Only names matching the
+  `<uuid>.json` scheme the class writes are ever removed, deletion failures are swallowed so a save
+  still succeeds, and `clear()` is unchanged. Six tests in `HistoryPruneTest` cover kept, dropped,
+  empty-index, non-report files and uppercase ids.
 - [ ] **B2. Write the history index atomically.** A crash mid-write leaves a truncated JSON file that
   silently drops all history. Write to a temp file and `rename`.
 - [ ] **B3. Guard against an empty report list on load.** `loadRaw` returns null for a missing file;

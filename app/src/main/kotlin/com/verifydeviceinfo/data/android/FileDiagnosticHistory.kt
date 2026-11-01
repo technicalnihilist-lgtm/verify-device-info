@@ -45,7 +45,11 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
             }
             val entries = readIndex().toMutableList()
             entries.add(0, entry)
-            writeIndex(entries.take(50))
+            val kept = entries.take(MAX_INDEX_ENTRIES)
+            writeIndex(kept)
+            // Reports that fell out of the index can no longer be opened from the History screen,
+            // so drop their files as well; otherwise app-private storage grows without bound.
+            runCatching { pruneReports(kept) }
             entry
         }
 
@@ -64,6 +68,13 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
         reportDir.listFiles()?.forEach { it.delete() }
         indexFile.delete()
         Unit
+    }
+
+    private fun pruneReports(kept: List<HistoryEntry>) {
+        val files = reportDir.listFiles() ?: return
+        val stale = staleReportFiles(kept.mapTo(HashSet()) { it.id }, files.map { it.name }).toSet()
+        if (stale.isEmpty()) return
+        files.forEach { file -> if (file.name in stale) file.delete() }
     }
 
     private fun readIndex(): List<HistoryEntry> {
@@ -109,4 +120,24 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
         }
         indexFile.writeText(array.toString())
     }
+
+    private companion object {
+        const val MAX_INDEX_ENTRIES = 50
+    }
 }
+
+/**
+ * Report files are written as `<uuid>.json`. Nothing else in `history/reports/` is ours to remove,
+ * so only names matching that scheme are ever considered stale.
+ */
+private val REPORT_FILE_NAME =
+    Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\.json")
+
+/**
+ * Names of report files that no longer have an index entry and can be deleted. Pure, so it is
+ * unit-testable without a `Context`.
+ */
+internal fun staleReportFiles(keptIds: Set<String>, existingNames: List<String>): List<String> =
+    existingNames.filter { name ->
+        REPORT_FILE_NAME.matches(name) && name.substring(0, name.length - 5) !in keptIds
+    }
