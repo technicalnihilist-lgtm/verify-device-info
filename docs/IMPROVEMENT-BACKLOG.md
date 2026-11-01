@@ -23,7 +23,7 @@ build and tests green before committing.
 
 ## A. Performance — allocation and formatting hot paths
 
-- [ ] **A1. Precompile the regex in `AnalysisSupport.normalise`.** `Regex("[^a-z0-9]")` is compiled on
+- [x] **A1. Precompile the regex in `AnalysisSupport.normalise`.** `Regex("[^a-z0-9]")` is compiled on
   every call and this function runs in tight loops over model, brand and SoC strings. Hoist it to a
   `private val`. *Verify:* unit tests unchanged; no behaviour difference.
 - [ ] **A2. Replace `String.format` in `Formatters`.** `Formatters.bytes` and friends allocate a

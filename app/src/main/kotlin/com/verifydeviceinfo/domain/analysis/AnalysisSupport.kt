@@ -11,8 +11,18 @@ import java.util.Locale
 
 internal object AnalysisSupport {
 
+    /**
+     * Compiled once for the life of the process. `Regex` compiles its pattern in the constructor,
+     * and [normalise] runs in tight loops over model, brand and SoC strings during a scan, so
+     * rebuilding the pattern per call dominated the cost of normalising a short string.
+     */
+    private val nonAlphanumeric = Regex("[^a-z0-9]")
+
+    /** Same reasoning as [nonAlphanumeric], for the token splitting in [socMatches]. */
+    private val nonAlphanumericRuns = Regex("[^a-z0-9]+")
+
     fun normalise(value: String?): String =
-        value.orEmpty().lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")
+        value.orEmpty().lowercase(Locale.US).replace(nonAlphanumeric, "")
 
     /** Brand families where the marketing brand legitimately differs from the manufacturer. */
     val brandAliases: Map<String, Set<String>> = mapOf(
@@ -106,11 +116,11 @@ internal object AnalysisSupport {
         if (r == ref) return true
         if (ref.contains(r) || r.contains(ref)) return true
         val refTokens = reference.lowercase(Locale.US)
-            .split(Regex("[^a-z0-9]+"))
+            .split(nonAlphanumericRuns)
             .filter { it.length >= 4 }
         if (refTokens.any { r.contains(it) }) return true
         val reportedTokens = reported.orEmpty().lowercase(Locale.US)
-            .split(Regex("[^a-z0-9]+"))
+            .split(nonAlphanumericRuns)
             .filter { it.length >= 4 }
         return reportedTokens.any { ref.contains(it) }
     }
