@@ -11,9 +11,12 @@ import com.verifydeviceinfo.core.model.DiagnosticSession
 import com.verifydeviceinfo.core.model.HistoryEntry
 import com.verifydeviceinfo.core.model.ReferenceMatch
 import com.verifydeviceinfo.core.model.ScanProgress
+import com.verifydeviceinfo.core.util.ScanCoordinator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -46,23 +49,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         refreshHistory()
     }
 
+    /**
+     * Keeps the scan single-flight and makes the newest request win: a scan that is already running
+     * is cancelled rather than making the new request a no-op, so a scan wedged in a blocking
+     * collector cannot lock the app out of rescanning. See [ScanCoordinator].
+     */
+    private val scans = ScanCoordinator(viewModelScope)
+
     fun scan(useMockData: Boolean = false) {
-        if (_state.value.scanning) return
-        viewModelScope.launch {
-            _state.value = _state.value.copy(
-                scanning = true, error = null, message = null, exportFile = null,
-                progress = ScanProgress(0, 8, "Preparing"), usedMockData = useMockData
-            )
+        scans.start { generation ->
+            publish(generation) {
+                it.copy(
+                    scanning = true, error = null, message = null, exportFile = null,
+                    progress = ScanProgress(0, 8, "Preparing"), usedMockData = useMockData
+                )
+            }
             try {
                 val provider = if (useMockData) container.mockProvider else container.deviceInformationProvider
                 if (provider == null) {
-                    _state.value = _state.value.copy(
-                        scanning = false, error = "Mock data is only available in debug builds."
-                    )
-                    return@launch
+                    publish(generation) {
+                        it.copy(
+                            scanning = false, error = "Mock data is only available in debug builds."
+                        )
+                    }
+                    return@start
                 }
                 val snapshot = provider.collect { progress ->
-                    _state.value = _state.value.copy(progress = progress)
+                    publish(generation) { it.copy(progress = progress) }
                 }
                 val reference = container.referenceRepository.match(
                     snapshot.identity.model, snapshot.identity.brand, snapshot.identity.device
@@ -85,23 +98,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     appVersion = snapshot.appVersion,
                     redacted = _state.value.redacted
                 )
+                // A scan superseded while it was finishing must not write history or state.
+                if (!scans.isCurrent(generation)) return@start
                 container.history.save(report, null)
-                _state.value = _state.value.copy(
-                    scanning = false,
-                    progress = ScanProgress(8, 8, "Complete", finished = true),
-                    snapshot = snapshot,
-                    reference = reference,
-                    report = report,
-                    message = if (snapshot.isMock) "Mock scan complete (development fixture)." else null
-                )
-                refreshHistory()
+                publish(generation) {
+                    it.copy(
+                        scanning = false,
+                        progress = ScanProgress(8, 8, "Complete", finished = true),
+                        snapshot = snapshot,
+                        reference = reference,
+                        report = report,
+                        message = if (snapshot.isMock) "Mock scan complete (development fixture)." else null
+                    )
+                }
+                if (scans.isCurrent(generation)) refreshHistory()
+            } catch (e: CancellationException) {
+                // Superseded by a newer scan: that is not a failure and must not be reported as one.
+                throw e
             } catch (e: Exception) {
-                _state.value = _state.value.copy(
-                    scanning = false,
-                    error = "Scan failed: ${e.message ?: e.javaClass.simpleName}"
-                )
+                publish(generation) {
+                    it.copy(
+                        scanning = false,
+                        error = "Scan failed: ${e.message ?: e.javaClass.simpleName}"
+                    )
+                }
             }
         }
+    }
+
+    /** Applies a scan's state change only while that scan is still the newest one. */
+    private inline fun publish(generation: Long, transform: (UiState) -> UiState) {
+        if (!scans.isCurrent(generation)) return
+        _state.update(transform)
     }
 
     fun runAutomatedDiagnostics() {

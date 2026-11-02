@@ -126,8 +126,20 @@ build and tests green before committing.
   line. Seven tests in `SystemPropertyReaderTest` pin parse-once per reader, two parses for two
   readers, malformed-line survival, blank/missing values, typed accessors and a failing loader.
   Behaviour of every accessor is unchanged.
-- [ ] **C2. Cancel an in-flight scan when a new one starts.** `AppViewModel.scan` returns early if
+- [x] **C2. Cancel an in-flight scan when a new one starts.** `AppViewModel.scan` returns early if
   `scanning` is true; a queued second tap should either be ignored cleanly or cancel and restart.
+  *Done:* newest request wins. The `if (scanning) return` guard is gone; a new `ScanCoordinator`
+  (`core/util`) cancels the running job and starts the new scan, so a scan wedged in a blocking
+  collector — a Binder call into a camera another app holds, a `getprop` that never exits — can no
+  longer lock the app out of scanning for the rest of the process. Cancellation is cooperative, so
+  each request carries a generation number and every state write and side effect is gated on
+  `isCurrent`: a superseded scan that is still winding down cannot overwrite the progress, the
+  report or the history entry of the scan that replaced it, and `CancellationException` is re-thrown
+  instead of surfacing as "Scan failed". `publish` now goes through `MutableStateFlow.update`, so
+  the read-modify-write is atomic across the IO collector thread and the main thread. Five tests in
+  `ScanCoordinatorTest` pin supersede-cancels-the-old-scan, a superseded scan stopping its work,
+  generation currency, and that a finished scan does not lock out the next one. No rendering, copy
+  or navigation change; `assembleDebug` and all 84 unit tests are green.
 - [ ] **C3. Debounce `rebuildReport`.** Recording a test re-runs four engines; rapid test results
   (e.g. several sensors) trigger redundant work. Coalesce.
 - [ ] **C4. Verify probe teardown.** Confirm `SensorProbe`, `AudioProbe` and `CameraProbe` release
