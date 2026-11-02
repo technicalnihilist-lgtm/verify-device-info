@@ -79,13 +79,9 @@ class BatteryCollector(private val context: Context) {
 
         val designCapacity = readDesignCapacityMah()
 
-        // Estimated full-charge capacity: only meaningful at (or near) full charge.
-        val estimatedFullMah = if (percent != null && percent >= 99 && chargeCounter != null) {
-            (chargeCounter / 1000.0).roundToInt()
-        } else null
-        val healthPercent = if (designCapacity != null && estimatedFullMah != null && designCapacity > 0) {
-            (estimatedFullMah * 100.0 / designCapacity).roundToInt().coerceIn(1, 150)
-        } else null
+        // Estimated full-charge capacity: only meaningful at (or near) full charge, and only
+        // reported when the resulting ratio is credible against the design capacity.
+        val healthPercent = BatteryHealthEstimator.healthPercent(percent, chargeCounter, designCapacity)
 
         fields += FieldBuilder.value(
             "battery.percent", "Charge level", percent?.let { "$it%" }, SpecGroup.BATTERY,

@@ -53,7 +53,10 @@ sending device identifiers to a server.
   the public camera list, so a lower count is an indicator, not proof.
 * **Sensors.** Vendor strings in the sensor list come from firmware and can be spoofed.
 * **Battery health.** Estimated capacity compares the charge counter at full charge with the platform's
-  design capacity. It is an estimate, and it is only meaningful near 100% charge.
+  design capacity. It is an estimate, and it is only meaningful near 100% charge. When the ratio falls
+  outside 20–150% — the signature of a counter in the wrong unit or a design capacity the platform
+  under-reports — no percentage is shown, because a number there would be invented rather than
+  measured.
 * **Scores are point-in-time.** Free memory, thermal state and battery temperature change constantly.
 
 ## Deliberate design choices

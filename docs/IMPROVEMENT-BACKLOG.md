@@ -90,10 +90,24 @@ build and tests green before committing.
   Rendering is unchanged: same rows, same labels, same formatting — the fallback only fills values that
   used to be missing. Also hardened while in there: a throwing `defaultDisplay`, a NaN/zero refresh rate,
   a missing `hdrCapabilities`, and an infinite dpi no longer propagate.
-- [ ] **B7. Camera characteristics race.** Enumerating cameras while another app holds the camera can
+- [x] **B7. Camera characteristics race.** Enumerating cameras while another app holds the camera can
   throw `CameraAccessException`; make sure it is caught per camera id, not per whole enumeration.
-- [ ] **B8. Battery `healthPercent` sanity.** Clamp against a plausible range and refuse to report a
+  *Done:* already the case — `CameraCollector.collect` wraps the whole per-id body (characteristics
+  read, stream map, physical ids) in its own `try`, so a camera that throws while another app holds
+  it becomes a single `camera.<id>.error` field and the remaining ids are still enumerated; only
+  `manager.cameraIdList` itself sits under the outer catch, which is the one failure that genuinely
+  leaves nothing to iterate. Nothing to change.
+- [x] **B8. Battery `healthPercent` sanity.** Clamp against a plausible range and refuse to report a
   percentage when the charge counter is clearly not at full charge.
+  *Done:* the arithmetic moved out of `BatteryCollector` into `BatteryHealthEstimator`, a
+  framework-free object with 11 unit tests. The full-charge guard is unchanged (99%), but the old
+  `coerceIn(1, 150)` is gone: it turned an unusable measurement into a plausible-looking percentage.
+  A charge counter reported in mAh instead of µAh (3700 → 3 mAh, 0.08% of a 3900 mAh design) used to
+  be reported as **1%** and is now withheld; an under-reported design capacity (3700 mAh against a
+  1000 mAh design, 370%) used to be reported as **150%** and is now withheld. Ratios inside 20–150%
+  are reported unchanged, so a worn pack at 60% and a replacement cell at 121% still show. Counters
+  that round to 0 mAh, missing/zero/negative counters and a missing design capacity all yield null,
+  which the screen already rendered as "Not measurable now".
 
 ## C. Memory and lifecycle
 
