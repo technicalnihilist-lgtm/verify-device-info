@@ -63,13 +63,22 @@ build and tests green before committing.
   its own partial temp file. Seven tests in `HistoryIndexWriteTest` cover first write, replacing a
   longer value, UTF-8 round-trip, no leftover temp file, parent-directory creation, previous contents
   surviving a failed write, and recovery once the obstruction is gone.
-- [ ] **B3. Guard against an empty report list on load.** `loadRaw` returns null for a missing file;
-  confirm the History screen never shows a blank expanded card, and that a corrupt file degrades to a
-  message rather than an exception.
-- [ ] **B4. Fix the `sincePatch` off-by-one.** `DefaultIntegrityAnalyzer` computes patch age from the
-  first of the month; confirm the boundary at exactly 365 and 730 days behaves as documented.
-- [ ] **B5. Handle a zero-size sensor list.** `ScoreEngine` treats an empty sensor list as 0; on a
-  device with no sensors reported this should be excluded, not scored as failure.
+- [x] **B3. Guard against an empty report list on load.** *Not done:* the one genuinely wrong state is
+  the perpetual "Loading stored report…" shown when a report file is missing, and fixing it needs a
+  new message — user-visible copy, which the hard rule forbids. The corrupt-file path already
+  degrades without an exception (`loadRaw` returns the text or null; the screen only renders it).
+  Belongs to a design pass.
+- [x] **B4. Fix the `sincePatch` off-by-one.** *Nothing to fix:* there is no `sincePatch`; `parsePatchDays`
+  measures from the first of the patch month, which is the oldest possible date for a `YYYY-MM` value
+  and therefore the conservative reading, and its 365/730 boundaries agree with `DefaultScoreEngine`
+  (`<= 365 → 80`, `<= 730 → 50`).
+- [x] **B5. Handle a zero-size sensor list.** *Done:* the "Sensors enumerated" input in the Hardware
+  health score now yields `null` instead of `0` when `hardware.sensors` is empty, so a device that
+  reports no sensors loses coverage instead of being scored as failed hardware — the rule the engine
+  already states, and what the "Sensor count" input in Display and sensors already did. On the test
+  fixture the sensorless device moves from 67/100 at 100% coverage to 89/100 at 75% coverage. The
+  rendered row is unchanged (`"0 sensors"`, same label); `ScoreInput.note` is not displayed anywhere
+  in the UI. New test in `ScoreEngineTest` pins both the old and new numbers.
 - [ ] **B6. `HardwareCollector.readDisplay` fallback.** If `getRealMetrics` throws (multi-display
   devices), fall back to `DisplayMetrics` from resources instead of returning null.
 - [ ] **B7. Camera characteristics race.** Enumerating cameras while another app holds the camera can

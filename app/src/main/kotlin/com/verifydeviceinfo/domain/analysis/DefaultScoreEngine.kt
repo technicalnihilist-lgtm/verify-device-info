@@ -101,8 +101,13 @@ class DefaultScoreEngine : EvidenceAndConfidenceEngine {
             acc.add(
                 "Sensors enumerated",
                 2f,
+                // An empty list means the platform reported no sensors, not that the sensors are
+                // broken. Under rule 1 that is missing evidence: it leaves both numerator and
+                // denominator and lowers coverage. Scoring it as 0 made a device that simply
+                // exposes no sensors read as failed hardware, and contradicted the "Sensor count"
+                // input below, which already excludes the same observation.
                 when {
-                    hardware.sensors.isEmpty() -> 0
+                    hardware.sensors.isEmpty() -> null
                     hardware.sensors.size < 4 -> 50
                     else -> 100
                 },

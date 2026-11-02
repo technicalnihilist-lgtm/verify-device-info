@@ -83,6 +83,27 @@ class ScoreEngineTest {
     }
 
     @Test
+    fun `a device that reports no sensors has the sensor input excluded, not scored as zero`() {
+        val baseline = scores(TestFixtures.snapshot(), DiagnosticSession()).byName("Hardware health")!!
+        val sensorless = scores(
+            TestFixtures.snapshot(hardware = TestFixtures.hardware(sensors = emptyList())),
+            DiagnosticSession()
+        ).byName("Hardware health")!!
+
+        // Counting an unreported sensor list as 0 gave 67/100 at full coverage, so a device that
+        // simply exposes no sensors read as broken hardware. Excluding it gives 89/100 at 75%
+        // coverage: the same treatment every other missing value already gets.
+        assertEquals(92, baseline.score!!)
+        assertEquals(100, baseline.coveragePercent)
+        assertEquals(89, sensorless.score!!)
+        assertEquals(75, sensorless.coveragePercent)
+
+        // The row itself is unchanged on screen; only the score it feeds is no longer a failure.
+        val sensorInput = sensorless.inputs.first { it.label == "Sensors enumerated" }
+        assertEquals("0 sensors", sensorInput.value)
+    }
+
+    @Test
     fun `running a failing test lowers hardware health`() {
         val clean = scores(TestFixtures.snapshot(), DiagnosticSession())
         val failing = scores(
