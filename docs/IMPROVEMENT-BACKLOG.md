@@ -55,8 +55,14 @@ build and tests green before committing.
   `<uuid>.json` scheme the class writes are ever removed, deletion failures are swallowed so a save
   still succeeds, and `clear()` is unchanged. Six tests in `HistoryPruneTest` cover kept, dropped,
   empty-index, non-report files and uppercase ids.
-- [ ] **B2. Write the history index atomically.** A crash mid-write leaves a truncated JSON file that
-  silently drops all history. Write to a temp file and `rename`.
+- [x] **B2. Write the history index atomically.** A crash mid-write leaves a truncated JSON file that
+  silently drops all history. Write to a temp file and `rename`. *Done:* `writeIndex` now goes through
+  a new `atomicWriteText` helper: the bytes are written to a sibling `index.json.tmp`, flushed and
+  `fd.sync()`ed, and only then renamed over the index, so a reader sees either the complete previous
+  file or the complete new one. A failed write leaves the existing index untouched and removes only
+  its own partial temp file. Seven tests in `HistoryIndexWriteTest` cover first write, replacing a
+  longer value, UTF-8 round-trip, no leftover temp file, parent-directory creation, previous contents
+  surviving a failed write, and recovery once the obstruction is gone.
 - [ ] **B3. Guard against an empty report list on load.** `loadRaw` returns null for a missing file;
   confirm the History screen never shows a blank expanded card, and that a corrupt file degrades to a
   message rather than an exception.

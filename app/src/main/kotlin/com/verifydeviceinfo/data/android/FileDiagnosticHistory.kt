@@ -11,6 +11,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.UUID
 
 /**
@@ -102,7 +104,6 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
     }
 
     private fun writeIndex(entries: List<HistoryEntry>) {
-        indexFile.parentFile?.mkdirs()
         val array = JSONArray()
         entries.forEach { entry ->
             array.put(
@@ -118,11 +119,40 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
                 }
             )
         }
-        indexFile.writeText(array.toString())
+        atomicWriteText(indexFile, array.toString())
     }
 
     private companion object {
         const val MAX_INDEX_ENTRIES = 50
+    }
+}
+
+/**
+ * Writes [content] to [target] so that an interrupted write can never leave a truncated file.
+ *
+ * The bytes go to a sibling temporary file, are flushed to the storage device, and only then
+ * renamed over [target]. A rename inside one directory is atomic, so a reader sees either the
+ * complete previous contents or the complete new contents — never half of either. If anything
+ * fails the temporary file is removed and [target] is left exactly as it was.
+ */
+internal fun atomicWriteText(target: File, content: String) {
+    val file = target.absoluteFile
+    val dir = file.parentFile ?: throw IOException("no parent directory for ${file.name}")
+    if (!dir.exists() && !dir.mkdirs() && !dir.exists()) {
+        throw IOException("could not create ${dir.name}")
+    }
+    val temp = File(dir, "${file.name}.tmp")
+    try {
+        FileOutputStream(temp).use { out ->
+            out.write(content.toByteArray(Charsets.UTF_8))
+            out.flush()
+            out.fd.sync()
+        }
+        if (!temp.renameTo(file)) throw IOException("could not replace ${file.name}")
+    } catch (t: Throwable) {
+        // Only clean up a partial temp file; anything else at that path is not ours to remove.
+        runCatching { if (temp.isFile) temp.delete() }
+        throw t
     }
 }
 
