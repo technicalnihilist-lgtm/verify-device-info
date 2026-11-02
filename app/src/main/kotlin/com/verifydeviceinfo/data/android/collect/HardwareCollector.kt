@@ -229,53 +229,89 @@ class HardwareCollector(private val context: Context) {
         )
     }
 
-    private fun readDisplay(): DisplayFacts? = try {
-        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    /**
+     * The display section. Falls back to the resource metrics when the real metrics cannot be read
+     * — a multi-display configuration can throw from [Display.getRealMetrics] — so the device keeps
+     * its display rows instead of losing the whole section.
+     */
+    private fun readDisplay(): DisplayFacts? {
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
         @Suppress("DEPRECATION")
-        val display: Display = windowManager.defaultDisplay
+        val display: Display? = try {
+            windowManager?.defaultDisplay
+        } catch (e: Exception) {
+            null
+        }
+
         val metrics = android.util.DisplayMetrics()
-        @Suppress("DEPRECATION")
-        display.getRealMetrics(metrics)
-
-        val refresh = if (display.refreshRate > 0f) display.refreshRate else 60f
-        val modes = try {
-            display.supportedModes.map { it.refreshRate }.distinct().sorted()
+        val readRealMetrics = display != null && try {
+            @Suppress("DEPRECATION")
+            display.getRealMetrics(metrics)
+            true
         } catch (e: Exception) {
+            false
+        }
+
+        if (!readRealMetrics) {
+            // The resource metrics describe the display the app is rendering on: window-sized on a
+            // multi-display or freeform device, but a strictly better answer than no section at all.
+            val fallback = try {
+                context.resources.displayMetrics
+            } catch (e: Exception) {
+                null
+            }
+            if (fallback == null || fallback.widthPixels <= 0 || fallback.heightPixels <= 0) return null
+            metrics.setTo(fallback)
+        }
+
+        val refresh = if (display != null && display.refreshRate > 0f) {
+            display.refreshRate
+        } else {
+            DisplayFactsFactory.FALLBACK_REFRESH_HZ
+        }
+        val modes = if (display == null) {
             listOf(refresh)
+        } else {
+            try {
+                display.supportedModes.map { it.refreshRate }.distinct().sorted()
+            } catch (e: Exception) {
+                listOf(refresh)
+            }
         }
-        val hdr = try {
-            display.hdrCapabilities.supportedHdrTypes.map {
-                when (it) {
-                    Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION -> "Dolby Vision"
-                    Display.HdrCapabilities.HDR_TYPE_HDR10 -> "HDR10"
-                    Display.HdrCapabilities.HDR_TYPE_HLG -> "HLG"
-                    Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS -> "HDR10+"
-                    else -> "Type $it"
-                }
-            }.distinct()
-        } catch (e: Exception) {
+        val hdr = if (display == null) {
             emptyList()
+        } else {
+            try {
+                display.hdrCapabilities.supportedHdrTypes.map {
+                    when (it) {
+                        Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION -> "Dolby Vision"
+                        Display.HdrCapabilities.HDR_TYPE_HDR10 -> "HDR10"
+                        Display.HdrCapabilities.HDR_TYPE_HLG -> "HLG"
+                        Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS -> "HDR10+"
+                        else -> "Type $it"
+                    }
+                }.distinct()
+            } catch (e: Exception) {
+                emptyList()
+            }
         }
-        val diagonal = if (metrics.xdpi > 0 && metrics.ydpi > 0) {
-            val widthInches = metrics.widthPixels / metrics.xdpi
-            val heightInches = metrics.heightPixels / metrics.ydpi
-            kotlin.math.sqrt(widthInches * widthInches + heightInches * heightInches)
-        } else 0f
+        val wideColorGamut = try {
+            context.resources.configuration.isScreenWideColorGamut
+        } catch (e: Exception) {
+            false
+        }
 
-        DisplayFacts(
+        return DisplayFactsFactory.build(
             widthPx = metrics.widthPixels,
             heightPx = metrics.heightPixels,
             densityDpi = metrics.densityDpi,
+            xdpi = metrics.xdpi,
+            ydpi = metrics.ydpi,
             refreshRateHz = refresh,
             supportedRefreshRates = modes,
             hdrTypes = hdr,
-            xdpi = metrics.xdpi,
-            ydpi = metrics.ydpi,
-            diagonalInches = diagonal,
-            wideColorGamut = (context.resources.configuration.isScreenWideColorGamut)
+            wideColorGamut = wideColorGamut
         )
-    } catch (e: Exception) {
-        null
     }
 
     private fun readProcMemInfo(): Pair<Long, Long>? = try {

@@ -79,8 +79,17 @@ build and tests green before committing.
   fixture the sensorless device moves from 67/100 at 100% coverage to 89/100 at 75% coverage. The
   rendered row is unchanged (`"0 sensors"`, same label); `ScoreInput.note` is not displayed anywhere
   in the UI. New test in `ScoreEngineTest` pins both the old and new numbers.
-- [ ] **B6. `HardwareCollector.readDisplay` fallback.** If `getRealMetrics` throws (multi-display
-  devices), fall back to `DisplayMetrics` from resources instead of returning null.
+- [x] **B6. `HardwareCollector.readDisplay` fallback.** If `getRealMetrics` throws (multi-display
+  devices), fall back to `DisplayMetrics` from resources instead of returning null. *Done:*
+  `readDisplay` now tries `getRealMetrics`, and on a throw (or when no default display exists) copies
+  `resources.displayMetrics` instead of abandoning the section, so the six display rows stay populated
+  with window-sized values rather than collapsing to the single "could not be read" row. The arithmetic
+  moved into `DisplayFactsFactory`, a framework-free object so the diagonal, the refresh-rate guard and
+  the mode/hdr de-duplication are unit-tested without a device (7 tests in `DisplayFactsFactoryTest`),
+  plus `HardwareCollectorDisplayTest` asserting the section is collected and reaches the report.
+  Rendering is unchanged: same rows, same labels, same formatting — the fallback only fills values that
+  used to be missing. Also hardened while in there: a throwing `defaultDisplay`, a NaN/zero refresh rate,
+  a missing `hdrCapabilities`, and an infinite dpi no longer propagate.
 - [ ] **B7. Camera characteristics race.** Enumerating cameras while another app holds the camera can
   throw `CameraAccessException`; make sure it is caught per camera id, not per whole enumeration.
 - [ ] **B8. Battery `healthPercent` sanity.** Clamp against a plausible range and refuse to report a
