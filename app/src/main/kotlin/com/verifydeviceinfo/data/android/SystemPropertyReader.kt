@@ -12,10 +12,21 @@ import java.util.concurrent.ConcurrentHashMap
  * is far cheaper than one process per property. Fallback: reflection on
  * android.os.SystemProperties, which the platform may block depending on target SDK.
  * Every accessor is optional — callers must handle null.
+ *
+ * The dump is parsed at most once per instance, so a single instance must be shared by every
+ * caller in a scan (see [com.verifydeviceinfo.AppContainer]): a second instance means a second
+ * `getprop` process and a second parse of the same ~900 lines.
+ *
+ * [dumpLoader] exists so the parse-once behaviour and the line parser can be unit-tested without
+ * a device; production code uses the default, which shells out to `getprop`.
  */
-class SystemPropertyReader {
+class SystemPropertyReader(
+    private val dumpLoader: () -> Map<String, String> = { readProcessDump() }
+) {
 
     private val cache = ConcurrentHashMap<String, String>()
+
+    @Volatile
     private var loaded = false
 
     @Synchronized
@@ -23,21 +34,7 @@ class SystemPropertyReader {
         if (loaded) return
         loaded = true
         try {
-            val process = ProcessBuilder("getprop").redirectErrorStream(true).start()
-            BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
-                var line = reader.readLine()
-                while (line != null) {
-                    // Format: [key]: [value]
-                    val closing = line.indexOf("]: [")
-                    if (line.startsWith("[") && closing > 1) {
-                        val key = line.substring(1, closing)
-                        val value = line.substring(closing + 4, line.length - 1)
-                        cache[key] = value
-                    }
-                    line = reader.readLine()
-                }
-            }
-            process.waitFor()
+            cache.putAll(dumpLoader())
         } catch (ignored: Throwable) {
             // getprop unavailable — reflection below may still work.
         }
@@ -73,5 +70,41 @@ class SystemPropertyReader {
     fun all(): Map<String, String> {
         loadDump()
         return cache.toMap()
+    }
+
+    companion object {
+
+        /** Runs `getprop` once and parses its dump. Returns an empty map if it cannot run. */
+        fun readProcessDump(): Map<String, String> {
+            val process = ProcessBuilder("getprop").redirectErrorStream(true).start()
+            try {
+                BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                    return parseDump(generateSequence { reader.readLine() })
+                }
+            } finally {
+                try {
+                    process.waitFor()
+                } catch (ignored: Throwable) {
+                }
+                process.destroy()
+            }
+        }
+
+        /**
+         * Parses lines of the form `[key]: [value]`. A malformed line is skipped rather than
+         * aborting the whole dump, so one odd property cannot cost every other property.
+         */
+        fun parseDump(lines: Sequence<String>): Map<String, String> {
+            val parsed = HashMap<String, String>(1024)
+            for (line in lines) {
+                if (!line.startsWith("[")) continue
+                val closing = line.indexOf("]: [")
+                if (closing <= 1) continue
+                if (!line.endsWith("]")) continue
+                if (line.length < closing + 5) continue
+                parsed[line.substring(1, closing)] = line.substring(closing + 4, line.length - 1)
+            }
+            return parsed
+        }
     }
 }

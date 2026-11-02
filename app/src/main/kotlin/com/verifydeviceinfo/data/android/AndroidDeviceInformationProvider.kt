@@ -25,12 +25,11 @@ import kotlinx.coroutines.withContext
  * actually completed, so the scanning animation cannot outrun the real work.
  */
 class AndroidDeviceInformationProvider(
-    private val context: Context
+    private val context: Context,
+    private val props: SystemPropertyReader = SystemPropertyReader()
 ) : DeviceInformationProvider {
 
     override val platform: Platform = Platform.ANDROID
-
-    private val props = SystemPropertyReader()
 
     override suspend fun collect(onProgress: (ScanProgress) -> Unit): DeviceSnapshot =
         withContext(Dispatchers.IO) {
@@ -59,7 +58,7 @@ class AndroidDeviceInformationProvider(
 
             // 2. Processor, memory, storage, display
             val hardwareResult = try {
-                HardwareCollector(context).collect()
+                HardwareCollector(context, props).collect()
             } catch (e: Exception) {
                 errors += "Hardware collection failed: ${e.message}"
                 null

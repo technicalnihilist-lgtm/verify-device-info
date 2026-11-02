@@ -9,6 +9,7 @@ import android.os.Environment
 import android.os.StatFs
 import android.view.Display
 import android.view.WindowManager
+import com.verifydeviceinfo.data.android.SystemPropertyReader
 import com.verifydeviceinfo.core.model.Confidence
 import com.verifydeviceinfo.core.model.DisplayFacts
 import com.verifydeviceinfo.core.model.SpecField
@@ -37,7 +38,10 @@ data class HardwareResult(
 )
 
 /** CPU, GPU, memory, storage and display — all read from public framework APIs. */
-class HardwareCollector(private val context: Context) {
+class HardwareCollector(
+    private val context: Context,
+    private val props: SystemPropertyReader = SystemPropertyReader()
+) {
 
     fun collect(): HardwareResult {
         val fields = mutableListOf<SpecField>()
@@ -107,7 +111,7 @@ class HardwareCollector(private val context: Context) {
         }
         fields += FieldBuilder.value(
             "storage.encryptionState", "Storage encryption",
-            SystemPropertySafe.get("ro.crypto.state"), SpecGroup.STORAGE, "ro.crypto.state",
+            props.get("ro.crypto.state"), SpecGroup.STORAGE, "ro.crypto.state",
             Confidence.MEDIUM
         )
 
@@ -363,11 +367,5 @@ class HardwareCollector(private val context: Context) {
             lower.contains("xclipse") || lower.contains("rDNA") -> "AMD (Samsung Xclipse)"
             else -> null
         }
-    }
-
-    /** Tiny accessor so this file does not need to hold a reader instance. */
-    private object SystemPropertySafe {
-        private val reader = com.verifydeviceinfo.data.android.SystemPropertyReader()
-        fun get(key: String): String? = reader.get(key)
     }
 }

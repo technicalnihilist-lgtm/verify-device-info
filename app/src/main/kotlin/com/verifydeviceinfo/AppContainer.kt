@@ -9,6 +9,7 @@ import com.verifydeviceinfo.data.android.AssetReferenceRepository
 import com.verifydeviceinfo.data.android.FileDiagnosticHistory
 import com.verifydeviceinfo.data.android.MockDeviceProvider
 import com.verifydeviceinfo.data.android.PdfReportGenerator
+import com.verifydeviceinfo.data.android.SystemPropertyReader
 import com.verifydeviceinfo.domain.AuthenticityAnalysisEngine
 import com.verifydeviceinfo.domain.DeviceAgeEstimator
 import com.verifydeviceinfo.domain.DeviceInformationProvider
@@ -34,9 +35,16 @@ class AppContainer(private val application: Application) {
     private val preferences =
         application.getSharedPreferences("verify_device_info", Context.MODE_PRIVATE)
 
+    /**
+     * One reader for the whole process: the `getprop` dump is parsed once and every collector
+     * that needs a property reads that one map instead of shelling out again.
+     */
+    val systemPropertyReader = SystemPropertyReader()
+
     val referenceRepository: ReferenceRepository = AssetReferenceRepository(application)
     val permissionManager = AndroidPermissionManager(application)
-    val deviceInformationProvider: DeviceInformationProvider = AndroidDeviceInformationProvider(application)
+    val deviceInformationProvider: DeviceInformationProvider =
+        AndroidDeviceInformationProvider(application, systemPropertyReader)
     val diagnosticsEngine: HardwareDiagnosticsEngine =
         AndroidHardwareDiagnosticsEngine(application, permissionManager)
     val authenticityEngine: AuthenticityAnalysisEngine = DefaultAuthenticityEngine()

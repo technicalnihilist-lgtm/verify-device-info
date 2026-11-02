@@ -111,8 +111,21 @@ build and tests green before committing.
 
 ## C. Memory and lifecycle
 
-- [ ] **C1. Single `SystemPropertyReader` instance.** It is currently constructed in three places, so
+- [x] **C1. Single `SystemPropertyReader` instance.** It is currently constructed in three places, so
   the `getprop` dump is parsed up to three times per scan. Share one instance from `AppContainer`.
+  *Done:* there were two instances, not three — `AndroidDeviceInformationProvider` (shared by
+  `IdentityCollector` and `SecurityCollector`) and a private `SystemPropertySafe` object inside
+  `HardwareCollector`, so a scan spawned `getprop` and parsed the same dump twice. `AppContainer` now
+  owns one `systemPropertyReader`, passes it to the provider, and the provider passes it to
+  `HardwareCollector`; both constructors keep a default so the existing test that builds a collector
+  directly still compiles. Per scan: 2 `getprop` processes and 2 dump parses → 1 of each. A 900-line
+  dump parses in 247 µs best / 1.9 ms average in a JVM benchmark (300 runs), so the saving is one
+  process spawn plus that parse, per scan. The parse also moved into a companion `parseDump` behind an
+  injectable loader, which made two things testable and fixed one: a truncated line (`[k]: [`) used to
+  throw out of `substring` and abandon the entire dump — it is now skipped, like any other malformed
+  line. Seven tests in `SystemPropertyReaderTest` pin parse-once per reader, two parses for two
+  readers, malformed-line survival, blank/missing values, typed accessors and a failing loader.
+  Behaviour of every accessor is unchanged.
 - [ ] **C2. Cancel an in-flight scan when a new one starts.** `AppViewModel.scan` returns early if
   `scanning` is true; a queued second tap should either be ignored cleanly or cancel and restart.
 - [ ] **C3. Debounce `rebuildReport`.** Recording a test re-runs four engines; rapid test results
