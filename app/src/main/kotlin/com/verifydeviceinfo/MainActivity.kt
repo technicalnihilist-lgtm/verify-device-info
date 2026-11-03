@@ -8,21 +8,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.verifydeviceinfo.data.android.AndroidPermissionManager
 import com.verifydeviceinfo.ui.AppNav
 import com.verifydeviceinfo.ui.AppViewModel
 import com.verifydeviceinfo.ui.theme.VerifyDeviceTheme
 
 class MainActivity : ComponentActivity() {
 
-    private var permissionBridge: com.verifydeviceinfo.data.android.AndroidPermissionManager? = null
+    private var permissionBridge: AndroidPermissionManager? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             VerifyDeviceTheme {
                 val viewModel: AppViewModel = viewModel()
-                permissionBridge = viewModel.container.permissionManager.also {
-                    it.activityProvider = { this }
+                // The manager is owned by the process-scoped container, so it is told which activity
+                // to request from and is detached again in onDestroy. Never hold `this` in it.
+                val manager = viewModel.container.permissionManager
+                if (permissionBridge !== manager) {
+                    permissionBridge = manager
+                    manager.attach(this)
                 }
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -32,6 +37,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        permissionBridge?.detach(this)
+        permissionBridge = null
+        super.onDestroy()
     }
 
     override fun onRequestPermissionsResult(

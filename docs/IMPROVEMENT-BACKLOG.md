@@ -174,8 +174,25 @@ build and tests green before committing.
   and token stability. No rendering, copy, navigation or feature change; `assembleDebug` and all 90
   unit tests are green. Unverified: the leak itself cannot be reproduced without a device, so the
   evidence is the guard's unit tests plus the callback ordering above, not an observed camera.
-- [ ] **C5. Avoid holding `Context` in long-lived objects.** Audit `AppContainer` and collectors for
-  anything that keeps an `Activity` reference.
+- [x] **C5. Avoid holding `Context` in long-lived objects.** Audit `AppContainer` and collectors for
+  anything that keeps an `Activity` reference. *Done:* audited the graph. `AppContainer` holds the
+  `Application` and nothing else; every collector, the device provider, the diagnostics engine, the
+  PDF writer, the history and the asset repository receive that application context, so none of them
+  can pin an activity. The one activity reference was in `AndroidPermissionManager`, which
+  `MainActivity` wired up with `activityProvider = { this }`. That manager lives in `AppContainer`,
+  which lives in the `AppViewModel` and therefore survives configuration changes, so every rotation
+  left the destroyed activity — with its whole Compose view tree — reachable until the next rotation
+  replaced it. The manager now holds the activity in a new `WeakRefHolder` (`core/util`), bound with
+  `attach(activity)` and unbound with `detach(activity)` from `MainActivity.onDestroy`; `detach` is
+  identity-checked, so a late detach from a destroyed activity cannot unbind the one that replaced it.
+  `getPreferences`/`requestPermissions` call sites are unchanged, so permission behaviour and every
+  on-screen state are identical. Seven tests in `WeakRefHolderTest` pin set/get, identity-checked
+  clear, replacement, a repeated clear, and that the holder does not keep its referent alive across a
+  GC. `assembleDebug` and all 97 unit tests are green (90 before, 7 new). Unverified: the leak itself
+  cannot be observed without a device — the evidence is the reference graph above plus the holder's
+  unit tests. A permission request that is still pending when the process-scoped manager is detached
+  (app finished, not rotated) still leaves its coroutine awaiting, exactly as before; completing it
+  needs a decision about what to report to a screen that no longer exists.
 
 ## D. Robustness — graceful degradation
 

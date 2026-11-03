@@ -9,6 +9,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.verifydeviceinfo.core.model.AppPermission
 import com.verifydeviceinfo.core.model.PermissionState
+import com.verifydeviceinfo.core.util.WeakRefHolder
 import com.verifydeviceinfo.domain.PermissionManager
 import kotlinx.coroutines.CompletableDeferred
 
@@ -18,7 +19,25 @@ import kotlinx.coroutines.CompletableDeferred
  */
 class AndroidPermissionManager(private val context: Context) : PermissionManager {
 
-    var activityProvider: (() -> ComponentActivity?)? = null
+    /**
+     * The activity a permission request is started from. Held weakly and detached by its owner on
+     * destroy: this manager is process-scoped (it lives in [com.verifydeviceinfo.AppContainer], which
+     * outlives the activity across configuration changes), so a strong reference here would keep a
+     * destroyed activity — and its whole view tree — alive for the rest of the process.
+     */
+    private val activityRef = WeakRefHolder<ComponentActivity>()
+
+    /** Binds the current activity, replacing any earlier one. */
+    fun attach(activity: ComponentActivity) {
+        activityRef.set(activity)
+    }
+
+    /** Unbinds [activity]; a detach from an activity that has already been replaced is ignored. */
+    fun detach(activity: ComponentActivity) {
+        activityRef.clear(activity)
+    }
+
+    private fun currentActivity(): ComponentActivity? = activityRef.get()
 
     private val pending = mutableMapOf<Int, CompletableDeferred<PermissionState>>()
     private var nextRequestCode = 4100
@@ -38,7 +57,7 @@ class AndroidPermissionManager(private val context: Context) : PermissionManager
             ?: return PermissionState.NOT_REQUIRED
         val granted = ContextCompat.checkSelfPermission(context, name) == PackageManager.PERMISSION_GRANTED
         if (granted) return PermissionState.GRANTED
-        val activity = activityProvider?.invoke() ?: return PermissionState.DENIED
+        val activity = currentActivity() ?: return PermissionState.DENIED
         val permanently = !ActivityCompat.shouldShowRequestPermissionRationale(activity, name) &&
             (activity.getPreferences(0).getBoolean("requested_$name", false))
         return if (permanently) PermissionState.PERMANENTLY_DENIED else PermissionState.DENIED
@@ -50,7 +69,7 @@ class AndroidPermissionManager(private val context: Context) : PermissionManager
     override suspend fun request(permission: AppPermission): PermissionState {
         val name = androidPermission(permission) ?: return PermissionState.NOT_REQUIRED
         if (isGranted(permission)) return PermissionState.GRANTED
-        val activity = activityProvider?.invoke() ?: return PermissionState.DENIED
+        val activity = currentActivity() ?: return PermissionState.DENIED
         val deferred = CompletableDeferred<PermissionState>()
         val code = nextRequestCode++
         pending[code] = deferred
