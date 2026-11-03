@@ -237,8 +237,24 @@ build and tests green before committing.
   unparseable/missing-`devices` documents yielding an empty list, and the shipped asset still
   parsing to its 16 entries with the first one's values unchanged. `assembleDebug` and all 112 unit
   tests are green (105 before, 7 new).
-- [ ] **D3. Empty-state audit.** Every screen must render a sensible state when `snapshot` is null and
+- [x] **D3. Empty-state audit.** Every screen must render a sensible state when `snapshot` is null and
   when `report` is null — verify each one, no crash on first launch.
+  *Done:* every composable `AppNav` can reach (the twelve destinations and the six interactive test
+  screens) was rendered against `UiState()` — no snapshot, no report, no stored history — and the
+  snapshot-dependent and report-dependent ones again against a snapshot with no report. Nothing
+  crashed and no screen needed a change: the ten snapshot- or report-dependent screens already fall
+  through to the shared `EmptyState` card, the dashboard renders "No scan yet" with its scan button
+  and coerces a null `progress` to 0 % / "Starting", `DiagnosticsScreen` renders from the test
+  catalogue alone, `HistoryScreen` has its own no-history copy, and the six test screens degrade to
+  "Not available" / "Sensor not present" / waiting states because each reads `state.snapshot?`
+  defensively and every probe constructor is side-effect free. The audit is now permanent:
+  `EmptyStateTest` (22 Robolectric tests) renders all eighteen screens in those states and asserts
+  the specific placeholder text, not merely that composition did not throw. One finding deliberately
+  left alone: the report-dependent screens say "Run a scan first." even when a scan has run but no
+  report exists. That state is not reachable today — the view model writes `snapshot` and `report` in
+  the same update — and correcting the copy is user-visible, so it belongs to a design pass. No UI,
+  copy, layout or behaviour change; `assembleDebug` and all 134 unit tests are green (112 before,
+  22 new).
 - [ ] **D4. `PermissionManager` preferences.** `activity.getPreferences(0)` opens a file per call;
   cache the `SharedPreferences` handle.
 
