@@ -1,0 +1,93 @@
+package com.verifydeviceinfo.core.util
+
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeoutOrNull
+
+/** What one collection stage produced. */
+sealed interface StageOutcome<out T> {
+    /** The stage finished; [value] is whatever it returned, which may be null. */
+    data class Done<T>(val value: T) : StageOutcome<T>
+
+    /** The stage threw. The scan continues without it, exactly as before. */
+    data class Failed(val error: Throwable) : StageOutcome<Nothing>
+
+    /** The stage did not finish inside its slice of the scan's time budget. */
+    data object TimedOut : StageOutcome<Nothing>
+}
+
+/**
+ * Runs collection stages under a hard time limit so a stuck Binder call cannot hang the scan.
+ *
+ * Every collector stage is a blocking Java call — `getprop`, `PackageManager`, the camera service,
+ * the sensor list. Those calls have no timeout of their own: when another app holds the camera, or
+ * a vendor's property service stops answering, the call never returns and the scan never finishes,
+ * leaving the screen on "Scanning" with no way out. [run] gives each stage a deadline and, when the
+ * deadline passes, hands control back to the caller so the remaining stages still run and the scan
+ * completes with the facts it could gather.
+ *
+ * The work runs on [scope], which is deliberately *not* a child of the caller: a coroutine blocked
+ * inside a Java call does not observe cancellation, so a stage abandoned as timed out would keep
+ * the caller's structured scope waiting forever. It is abandoned instead, and cancelled so that a
+ * cooperative stage stops at its next suspension point.
+ *
+ * Two limits apply: [stageTimeoutMillis] per stage, and [totalTimeoutMillis] for the whole scan,
+ * which caps every later stage at whatever is left of the budget.
+ */
+class StageTimer(
+    private val scope: CoroutineScope,
+    val stageTimeoutMillis: Long = DEFAULT_STAGE_TIMEOUT_MILLIS,
+    private val totalTimeoutMillis: Long = DEFAULT_TOTAL_TIMEOUT_MILLIS,
+    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val clock: () -> Long = { System.nanoTime() / 1_000_000L }
+) {
+
+    private val startedAtMillis = clock()
+
+    /** Milliseconds left of the whole-scan budget; never negative. */
+    fun remainingMillis(): Long =
+        (totalTimeoutMillis - (clock() - startedAtMillis)).coerceAtLeast(0L)
+
+    /** The limit that applies to the next stage: its own limit, capped by the budget left. */
+    fun nextStageTimeoutMillis(): Long = minOf(stageTimeoutMillis, remainingMillis())
+
+    /**
+     * Runs [block] and reports what happened. Never throws for a stage failure or a timeout; only
+     * cancellation of the calling coroutine propagates, so a superseded scan still unwinds.
+     */
+    suspend fun <T> run(block: suspend () -> T): StageOutcome<T> {
+        val budget = nextStageTimeoutMillis()
+        if (budget <= 0L) return StageOutcome.TimedOut
+
+        val work = scope.async(dispatcher) { Box(block()) }
+        val boxed = try {
+            withTimeoutOrNull(budget) { work.await() }
+        } catch (e: CancellationException) {
+            // The caller was cancelled (a newer scan superseded this one): stop the stage too.
+            work.cancel()
+            throw e
+        } catch (e: Exception) {
+            work.cancel()
+            return StageOutcome.Failed(e)
+        }
+        if (boxed == null) {
+            work.cancel()
+            return StageOutcome.TimedOut
+        }
+        return StageOutcome.Done(boxed.value)
+    }
+
+    /** Distinguishes "the stage returned null" from "the stage timed out". */
+    private class Box<T>(val value: T)
+
+    companion object {
+        /** A single stage longer than this is not collecting anything, it is stuck. */
+        const val DEFAULT_STAGE_TIMEOUT_MILLIS: Long = 20_000L
+
+        /** Ceiling for a whole scan, so eight stuck stages cannot add up to a hang. */
+        const val DEFAULT_TOTAL_TIMEOUT_MILLIS: Long = 90_000L
+    }
+}

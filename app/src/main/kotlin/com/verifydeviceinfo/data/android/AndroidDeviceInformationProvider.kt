@@ -7,6 +7,8 @@ import com.verifydeviceinfo.core.model.HardwareFacts
 import com.verifydeviceinfo.core.model.Platform
 import com.verifydeviceinfo.core.model.ScanProgress
 import com.verifydeviceinfo.core.model.SpecField
+import com.verifydeviceinfo.core.util.StageOutcome
+import com.verifydeviceinfo.core.util.StageTimer
 import com.verifydeviceinfo.data.android.collect.AudioCollector
 import com.verifydeviceinfo.data.android.collect.BatteryCollector
 import com.verifydeviceinfo.data.android.collect.CameraCollector
@@ -17,12 +19,19 @@ import com.verifydeviceinfo.data.android.collect.SecurityCollector
 import com.verifydeviceinfo.data.android.collect.SensorCollector
 import com.verifydeviceinfo.data.android.collect.SoftwareCollector
 import com.verifydeviceinfo.domain.DeviceInformationProvider
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 
 /**
  * Collects a complete snapshot from Android. Every stage reports progress only when it has
  * actually completed, so the scanning animation cannot outrun the real work.
+ *
+ * Each stage runs under a [StageTimer] deadline. A collector blocked in a Binder call that never
+ * returns — another app holding the camera, a property service that stopped answering — is
+ * abandoned instead of hanging the scan: it is recorded in [DeviceSnapshot.collectionErrors] and
+ * the remaining stages still run, so the scan always finishes with whatever it could read.
  */
 class AndroidDeviceInformationProvider(
     private val context: Context,
@@ -31,12 +40,19 @@ class AndroidDeviceInformationProvider(
 
     override val platform: Platform = Platform.ANDROID
 
+    /**
+     * Holds abandoned stages. Deliberately not a child of the scan coroutine: a coroutine blocked
+     * inside a Java call ignores cancellation, so a timed-out stage must not be waited for.
+     */
+    private val stageScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     override suspend fun collect(onProgress: (ScanProgress) -> Unit): DeviceSnapshot =
         withContext(Dispatchers.IO) {
             val total = 8
             var done = 0
             val errors = mutableListOf<String>()
             val fields = mutableListOf<SpecField>()
+            val timer = StageTimer(stageScope)
 
             fun stage(label: String) {
                 done++
@@ -44,11 +60,8 @@ class AndroidDeviceInformationProvider(
             }
 
             // 1. Identity and build properties
-            val identityResult = try {
+            val identityResult = collectStage(timer, errors, "Identity collection") {
                 IdentityCollector(props).collect()
-            } catch (e: Exception) {
-                errors += "Identity collection failed: ${e.message}"
-                null
             }
             identityResult?.let {
                 fields += it.fields
@@ -57,11 +70,8 @@ class AndroidDeviceInformationProvider(
             stage("Device identity and build properties")
 
             // 2. Processor, memory, storage, display
-            val hardwareResult = try {
+            val hardwareResult = collectStage(timer, errors, "Hardware collection") {
                 HardwareCollector(context, props).collect()
-            } catch (e: Exception) {
-                errors += "Hardware collection failed: ${e.message}"
-                null
             }
             hardwareResult?.let {
                 fields += it.fields
@@ -70,70 +80,49 @@ class AndroidDeviceInformationProvider(
             stage("Processor, memory and storage")
 
             // 3. Battery
-            val batteryPair = try {
+            val batteryPair = collectStage(timer, errors, "Battery collection") {
                 BatteryCollector(context).collect()
-            } catch (e: Exception) {
-                errors += "Battery collection failed: ${e.message}"
-                null
             }
             batteryPair?.let { fields += it.second }
             stage("Battery and power")
 
             // 4. Cameras
-            val cameraPair = try {
+            val cameraPair = collectStage(timer, errors, "Camera collection") {
                 CameraCollector(context).collect()
-            } catch (e: Exception) {
-                errors += "Camera collection failed: ${e.message}"
-                null
             }
             cameraPair?.let { fields += it.second }
             stage("Camera modules")
 
             // 5. Sensors
-            val sensorPair = try {
+            val sensorPair = collectStage(timer, errors, "Sensor collection") {
                 SensorCollector(context).collect()
-            } catch (e: Exception) {
-                errors += "Sensor collection failed: ${e.message}"
-                null
             }
             sensorPair?.let { fields += it.second }
             stage("Sensors")
 
             // 6. Connectivity
-            val connectivity = try {
+            val connectivity = collectStage(timer, errors, "Connectivity collection") {
                 ConnectivityCollector(context).collect()
-            } catch (e: Exception) {
-                errors += "Connectivity collection failed: ${e.message}"
-                null
             }
             connectivity?.let { fields += it.fields }
 
             // 7. Audio and haptics
-            val audio = try {
+            val audio = collectStage(timer, errors, "Audio collection") {
                 AudioCollector(context).collect()
-            } catch (e: Exception) {
-                errors += "Audio collection failed: ${e.message}"
-                null
             }
             audio?.let { fields += it.fields }
             stage("Connectivity and audio")
 
             // 8. Security, integrity and software inventory
-            val securityResult = try {
+            val securityResult = collectStage(timer, errors, "Security collection") {
                 SecurityCollector(context, props).collect()
-            } catch (e: Exception) {
-                errors += "Security collection failed: ${e.message}"
-                null
             }
             securityResult?.let {
                 fields += it.fields
                 fields += it.biometricFields
             }
-            val softwarePair = try {
+            val softwarePair = collectStage(timer, errors, "Software inventory") {
                 SoftwareCollector(context).collect()
-            } catch (e: Exception) {
-                errors += "Software inventory failed: ${e.message}"
-                null
             }
             softwarePair?.let { fields += it.second }
             stage("Security and installed software")
@@ -189,6 +178,27 @@ class AndroidDeviceInformationProvider(
                 isMock = false
             )
         }
+
+    /**
+     * Runs one stage and folds its outcome into [errors]. A failure keeps the message the app has
+     * always shown; a timeout says so instead of leaving the stage silently missing.
+     */
+    private suspend fun <T> collectStage(
+        timer: StageTimer,
+        errors: MutableList<String>,
+        label: String,
+        block: suspend () -> T
+    ): T? = when (val outcome = timer.run(block)) {
+        is StageOutcome.Done -> outcome.value
+        is StageOutcome.Failed -> {
+            errors += "$label failed: ${outcome.error.message}"
+            null
+        }
+        StageOutcome.TimedOut -> {
+            errors += "$label timed out after ${timer.stageTimeoutMillis / 1000} s"
+            null
+        }
+    }
 
     private fun fallbackIdentity() = com.verifydeviceinfo.core.model.DeviceIdentity(
         manufacturer = android.os.Build.MANUFACTURER ?: "Unknown",

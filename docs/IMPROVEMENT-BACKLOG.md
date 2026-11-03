@@ -196,8 +196,28 @@ build and tests green before committing.
 
 ## D. Robustness — graceful degradation
 
-- [ ] **D1. Timeout the whole scan.** A stuck camera or property read should not hang the scan forever;
+- [x] **D1. Timeout the whole scan.** A stuck camera or property read should not hang the scan forever;
   add a per-stage timeout with a clear "timed out" status instead of a silent hang.
+  *Done:* every one of the eight collection stages in `AndroidDeviceInformationProvider` now runs
+  under a `StageTimer` (`core/util`): 20 s per stage, 90 s for the whole scan, whichever is smaller,
+  so a scan always finishes. A stage that misses its deadline is recorded in the existing
+  collection-errors list (the same list, and the same place on screen, that a collector failure
+  already used: "Camera collection failed: timed out after 20 s") and the remaining stages still
+  run, so the scan completes with the facts it could read instead of leaving the screen on
+  "Scanning" with no way out. Two details matter: the stage work runs in a provider-owned scope
+  rather than as a child of the scan coroutine, because a coroutine blocked inside a Java call
+  ignores cancellation and would otherwise keep the caller's structured scope waiting forever; and
+  a timed-out stage is cancelled, so a cooperative one stops at its next suspension point while a
+  blocked one is simply abandoned. Worst case per scan goes from unbounded to 90 s (8 × 20 s = 160 s
+  before the whole-scan cap applies). Cost: one dispatcher hop per stage, measured at 2.2 ms per
+  stage and 17.3 ms for all eight (best of 20 runs of eight, 200 warm-up runs, 2-core sandbox),
+  against collectors that each take milliseconds to tens of milliseconds. Eight tests in
+  `StageTimerTest` pin: done including a null value, failed with the message preserved, timed out
+  with the next stage still running, the abandoned stage cancelled, the whole-scan cap capping a
+  later stage, no stage started once the budget is spent, and the cap arithmetic. No screen,
+  control, style, navigation or normal-path copy change; the only new string is the timeout detail
+  inside the existing error line. Unverified: the hang itself needs a device to reproduce, so the
+  evidence is the unit tests plus the wiring, not an observed stuck camera.
 - [ ] **D2. Fuzz the reference JSON loader.** A malformed entry currently aborts the whole load; skip
   the bad entry and keep the rest.
 - [ ] **D3. Empty-state audit.** Every screen must render a sensible state when `snapshot` is null and
