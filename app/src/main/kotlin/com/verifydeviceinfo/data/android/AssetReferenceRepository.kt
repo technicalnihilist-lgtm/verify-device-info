@@ -4,8 +4,6 @@ import android.content.Context
 import com.verifydeviceinfo.core.model.ReferenceDevice
 import com.verifydeviceinfo.core.model.ReferenceMatch
 import com.verifydeviceinfo.domain.ReferenceRepository
-import org.json.JSONArray
-import org.json.JSONObject
 import java.util.Locale
 
 /**
@@ -86,38 +84,13 @@ class AssetReferenceRepository(private val context: Context) : ReferenceReposito
     @Synchronized
     private fun load(): List<ReferenceDevice> {
         devices?.let { return it }
-        val parsed = mutableListOf<ReferenceDevice>()
-        try {
+        val parsed = try {
             val json = context.assets.open("device_reference.json").bufferedReader().use { it.readText() }
-            val root = JSONObject(json)
-            val devicesJson = root.optJSONArray("devices") ?: JSONArray()
-            for (index in 0 until devicesJson.length()) {
-                val obj = devicesJson.getJSONObject(index)
-                parsed += ReferenceDevice(
-                    modelPatterns = obj.optJSONArray("modelPatterns").toStringList(),
-                    brand = obj.optString("brand"),
-                    marketingName = obj.optString("marketingName"),
-                    soc = obj.optString("soc"),
-                    socManufacturer = obj.optString("socManufacturer"),
-                    releaseDate = obj.optString("releaseDate"),
-                    ramOptionsGb = obj.optJSONArray("ramOptionsGb").toIntList(),
-                    storageOptionsGb = obj.optJSONArray("storageOptionsGb").toIntList(),
-                    displayWidthPx = obj.optInt("displayWidthPx"),
-                    displayHeightPx = obj.optInt("displayHeightPx"),
-                    densityDpi = obj.optInt("densityDpi"),
-                    refreshRateHz = obj.optDouble("refreshRateHz", 60.0).toFloat(),
-                    rearCameraCount = obj.optInt("rearCameraCount"),
-                    frontCameraCount = obj.optInt("frontCameraCount"),
-                    mainCameraMegapixels = obj.optDouble("mainCameraMegapixels", 0.0),
-                    batteryMah = obj.optInt("batteryMah"),
-                    expectedSensors = obj.optJSONArray("expectedSensors").toStringList(),
-                    sourceUrl = obj.optString("sourceUrl"),
-                    sourceDate = obj.optString("sourceDate"),
-                    sourceName = obj.optString("sourceName")
-                )
-            }
+            // Per-entry parsing: one damaged entry is skipped, the rest of the set still loads.
+            ReferenceAssetParser.parse(json)
         } catch (e: Exception) {
-            // A missing or malformed asset degrades to "no reference data", never to a crash.
+            // A missing asset degrades to "no reference data", never to a crash.
+            emptyList()
         }
         // Build the normalised index once, next to the parsed entries, so a scan only normalises
         // the three strings it is asked about.
@@ -130,19 +103,5 @@ class AssetReferenceRepository(private val context: Context) : ReferenceReposito
         }
         devices = parsed
         return parsed
-    }
-
-    private fun JSONArray?.toStringList(): List<String> {
-        if (this == null) return emptyList()
-        val list = mutableListOf<String>()
-        for (i in 0 until length()) list += optString(i)
-        return list
-    }
-
-    private fun JSONArray?.toIntList(): List<Int> {
-        if (this == null) return emptyList()
-        val list = mutableListOf<Int>()
-        for (i in 0 until length()) list += optInt(i)
-        return list
     }
 }

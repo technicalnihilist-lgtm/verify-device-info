@@ -218,8 +218,25 @@ build and tests green before committing.
   control, style, navigation or normal-path copy change; the only new string is the timeout detail
   inside the existing error line. Unverified: the hang itself needs a device to reproduce, so the
   evidence is the unit tests plus the wiring, not an observed stuck camera.
-- [ ] **D2. Fuzz the reference JSON loader.** A malformed entry currently aborts the whole load; skip
-  the bad entry and keep the rest.
+- [x] **D2. Fuzz the reference JSON loader.** A malformed entry currently aborts the whole load; skip
+  the bad entry and keep the rest. *Done:* the parse loop moved into a new `ReferenceAssetParser`,
+  and each element of `devices` is now read inside its own `try`. An element that is not a JSON
+  object (`"text"`, `null`, `true`, `42`, a nested array) is skipped, and anything unexpected thrown
+  while a single entry is read costs that entry only; the rest of the set still loads. A document
+  that is not JSON at all, or has no `devices` array, still degrades to an empty set rather than
+  throwing. Field extraction is byte-for-byte the code the repository used before, so a well-formed
+  entry parses to exactly the same `ReferenceDevice` — including the `optInt`/`optDouble` defaults —
+  which a temporary test asserted by comparing the old inline loop against the new parser over all
+  16 bundled entries (`assertEquals` on the full lists) before it was removed. Under the old control
+  flow the exception left the loop, so an entry at index *i* of *n* cost entries *i…n−1*: one bad
+  element early in the set could reduce the app's reference data to a couple of models, silently and
+  with the on-screen count shrinking to match. Seven tests in `ReferenceAssetParserTest` pin:
+  non-object elements skipped with the neighbours intact, `null`/nested-array/number elements
+  skipped, a wrong-typed field defaulted instead of dropping the entry, every field of the entry
+  after a bad element preserved, absent numeric fields keeping their defaults, four
+  unparseable/missing-`devices` documents yielding an empty list, and the shipped asset still
+  parsing to its 16 entries with the first one's values unchanged. `assembleDebug` and all 112 unit
+  tests are green (105 before, 7 new).
 - [ ] **D3. Empty-state audit.** Every screen must render a sensible state when `snapshot` is null and
   when `report` is null — verify each one, no crash on first launch.
 - [ ] **D4. `PermissionManager` preferences.** `activity.getPreferences(0)` opens a file per call;
