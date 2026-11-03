@@ -72,10 +72,12 @@ class AudioProbe(private val context: Context) {
     /** Plays the platform's built-in DTMF tone as an alternative to the generated sine. */
     fun playBeep(durationMs: Int = 1000): Boolean = try {
         val generator = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
-        generator.startTone(ToneGenerator.TONE_DTMF_5, durationMs)
+        // Held before startTone so a failure there still releases the generator.
         toneGenerator = generator
+        generator.startTone(ToneGenerator.TONE_DTMF_5, durationMs)
         true
     } catch (e: Exception) {
+        stopBeep()
         false
     }
 
@@ -100,13 +102,16 @@ class AudioProbe(private val context: Context) {
                 @Suppress("DEPRECATION")
                 MediaRecorder()
             }
+            // Held from construction: if setAudioSource, prepare or start throws, the catch below
+            // releases the recorder instead of leaving the microphone claimed by an object that
+            // only the finalizer will ever free.
+            recorder = mediaRecorder
             mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC)
             mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
             mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
             mediaRecorder.setOutputFile(output.absolutePath)
             mediaRecorder.prepare()
             mediaRecorder.start()
-            recorder = mediaRecorder
 
             var peak = 0
             var sum = 0L

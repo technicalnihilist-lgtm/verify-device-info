@@ -140,10 +140,40 @@ build and tests green before committing.
   `ScanCoordinatorTest` pin supersede-cancels-the-old-scan, a superseded scan stopping its work,
   generation currency, and that a finished scan does not lock out the next one. No rendering, copy
   or navigation change; `assembleDebug` and all 84 unit tests are green.
-- [ ] **C3. Debounce `rebuildReport`.** Recording a test re-runs four engines; rapid test results
-  (e.g. several sensors) trigger redundant work. Coalesce.
-- [ ] **C4. Verify probe teardown.** Confirm `SensorProbe`, `AudioProbe` and `CameraProbe` release
+- [x] **C3. Debounce `rebuildReport`.** *Not worth doing:* there is no burst to coalesce. Every
+  `recordResult` call site is a single button tap followed immediately by `onBack()`, and the one path
+  that applies several results at once (`runAutomatedDiagnostics`) already applies them all and
+  rebuilds once. A debounce would add a scheduler, a window in which `state.report` is stale, and a
+  flush-before-export obligation, to save one rebuild per tap — measured at 299 µs best / 539 µs
+  average for the whole four-engine rebuild in a JVM benchmark over the test fixture (parts 48 µs,
+  age 48 µs, integrity 7 µs, scores 146 µs). Not worth the staleness risk unless a multi-result
+  recording path is ever added.
+- [x] **C4. Verify probe teardown.** Confirm `SensorProbe`, `AudioProbe` and `CameraProbe` release
   everything on every path, including when a test screen is left via the system back gesture.
+  *Done:* audited all three probes against the screens that own them. The screens hold each probe in
+  `remember` and release it from `onDispose`, and `AppNav` renders only `stack.last()`, so both the
+  back button and the system back gesture drop the composable and run that block — that half was
+  sound, and `SensorProbe.stop()` and `AudioProbe.release()` are symmetric on every path they reach.
+  Three release paths were not, and are fixed:
+  1. **Camera held forever after a fast exit.** `CameraManager.openCamera` is asynchronous, so leaving
+     the camera test before `onOpened` ran meant `close()` saw a null `device` and did nothing; the
+     device then arrived, was stored, and started a preview with no owner left to close it — the
+     camera (and the torch, if on) stayed claimed until the process died. `CameraProbe` now takes a
+     token per open from `StaleCloseGuard` and closes any device or session that arrives under a
+     stale one. Tokens taken after `close()` are current again, so reopening still works.
+  2. **The failed session was never closed.** `onConfigureFailed` reported the error but left the
+     `CameraCaptureSession` open; it is now closed before the error is raised.
+  3. **`AudioProbe` leaked on a failed start.** `measureMicrophone` assigned the field only after
+     `start()`, so a throw from `setAudioSource`/`prepare()`/`start()` left the `MediaRecorder`
+     unreleased, holding the microphone until the finalizer ran; the field is now set at
+     construction so the existing catch releases it. `playBeep` likewise held its `ToneGenerator` only
+     after `startTone`, and now releases it on failure.
+  A stale `onDisconnected`/`onError` also no longer clears a newer device or raises an error for a
+  screen that has already gone. Six tests in `StaleCloseGuardTest` pin the guard: current token
+  admits, stale token closes, a reopened probe admits again, repeated closes, a close that throws,
+  and token stability. No rendering, copy, navigation or feature change; `assembleDebug` and all 90
+  unit tests are green. Unverified: the leak itself cannot be reproduced without a device, so the
+  evidence is the guard's unit tests plus the callback ordering above, not an observed camera.
 - [ ] **C5. Avoid holding `Context` in long-lived objects.** Audit `AppContainer` and collectors for
   anything that keeps an `Activity` reference.
 
