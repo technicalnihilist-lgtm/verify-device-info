@@ -27,10 +27,28 @@ class AndroidPermissionManager(private val context: Context) : PermissionManager
      */
     private val activityRef = WeakRefHolder<ComponentActivity>()
 
+    /**
+     * The "already asked for" flags, resolved once per process.
+     *
+     * They live in the activity's own preferences file, named after
+     * [android.app.Activity.getLocalClassName] by [android.app.Activity.getPreferences], so the name
+     * is taken from the first activity that attaches; every later activity of the same class resolves
+     * to the same file. The handle itself is opened from the application context — the file belongs to
+     * the package, not to the activity — so nothing here keeps an activity alive.
+     */
+    @Volatile
+    private var requestLog: PermissionRequestLog? = null
+
     /** Binds the current activity, replacing any earlier one. */
     fun attach(activity: ComponentActivity) {
         activityRef.set(activity)
+        requestLogFor(activity)
     }
+
+    private fun requestLogFor(activity: ComponentActivity): PermissionRequestLog =
+        requestLog ?: synchronized(this) {
+            requestLog ?: PermissionRequestLog(context, activity.localClassName).also { requestLog = it }
+        }
 
     /** Unbinds [activity]; a detach from an activity that has already been replaced is ignored. */
     fun detach(activity: ComponentActivity) {
@@ -55,16 +73,20 @@ class AndroidPermissionManager(private val context: Context) : PermissionManager
     override fun state(permission: AppPermission): PermissionState {
         val name = androidPermission(permission)
             ?: return PermissionState.NOT_REQUIRED
-        val granted = ContextCompat.checkSelfPermission(context, name) == PackageManager.PERMISSION_GRANTED
-        if (granted) return PermissionState.GRANTED
+        if (ContextCompat.checkSelfPermission(context, name) == PackageManager.PERMISSION_GRANTED) {
+            return PermissionState.GRANTED
+        }
         val activity = currentActivity() ?: return PermissionState.DENIED
         val permanently = !ActivityCompat.shouldShowRequestPermissionRationale(activity, name) &&
-            (activity.getPreferences(0).getBoolean("requested_$name", false))
+            requestLogFor(activity).wasRequested(name)
         return if (permanently) PermissionState.PERMANENTLY_DENIED else PermissionState.DENIED
     }
 
-    override fun isGranted(permission: AppPermission): Boolean =
-        state(permission) == PermissionState.GRANTED || state(permission) == PermissionState.NOT_REQUIRED
+    override fun isGranted(permission: AppPermission): Boolean {
+        // One lookup, not one per branch: a refused permission used to be resolved twice per call.
+        val current = state(permission)
+        return current == PermissionState.GRANTED || current == PermissionState.NOT_REQUIRED
+    }
 
     override suspend fun request(permission: AppPermission): PermissionState {
         val name = androidPermission(permission) ?: return PermissionState.NOT_REQUIRED
@@ -73,7 +95,7 @@ class AndroidPermissionManager(private val context: Context) : PermissionManager
         val deferred = CompletableDeferred<PermissionState>()
         val code = nextRequestCode++
         pending[code] = deferred
-        activity.getPreferences(0).edit().putBoolean("requested_$name", true).apply()
+        requestLogFor(activity).markRequested(name)
         ActivityCompat.requestPermissions(activity, arrayOf(name), code)
         return deferred.await()
     }

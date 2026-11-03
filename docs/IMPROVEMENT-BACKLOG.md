@@ -255,8 +255,26 @@ build and tests green before committing.
   the same update — and correcting the copy is user-visible, so it belongs to a design pass. No UI,
   copy, layout or behaviour change; `assembleDebug` and all 134 unit tests are green (112 before,
   22 new).
-- [ ] **D4. `PermissionManager` preferences.** `activity.getPreferences(0)` opens a file per call;
+- [x] **D4. `PermissionManager` preferences.** `activity.getPreferences(0)` opens a file per call;
   cache the `SharedPreferences` handle.
+  *Done:* the handle now lives in a new `PermissionRequestLog` (`data/android`), resolved lazily on
+  the first check and kept for the process, so `state` and `request` no longer resolve the file name
+  and look the file up on every call. The name is still the activity's — `getLocalClassName`, which
+  is what `Activity.getPreferences(0)` used — taken from the first attached activity, so the flags an
+  earlier version wrote into `shared_prefs/<Activity>.xml` are still read: a permission refused
+  before the update is still reported as permanently refused after it, which a test pins by writing
+  the flag through `activity.getPreferences(0)` and asserting `PERMANENTLY_DENIED`. The handle is
+  opened from the application context (the file belongs to the package, not to the activity), so it
+  survives rotation and keeps no activity alive. `isGranted` also resolved the state twice for
+  anything that was not granted — `state(...) == GRANTED || state(...) == NOT_REQUIRED` — and now
+  resolves it once. Measured per call, not in microseconds: `state` went from 1 preferences lookup to
+  0 after the first, and `isGranted` on a refused permission from 2 `checkSelfPermission` calls and 2
+  lookups to 1 of each; on a granted permission and on a permission the platform does not have
+  (below API 31) it stays at 1 check and 0 lookups. Eight Robolectric tests in `PermissionManagerTest`
+  count the lookups through a `ContextWrapper` and pin the permanent-refusal file name, survival
+  across activity recreation, the flag being written before the request is raised, and the granted
+  and not-required paths. No UI, copy, layout or permission-behaviour change; `assembleDebug` and all
+  142 unit tests are green (134 before, 8 new).
 
 ## E. Tests — raise confidence without a device
 
