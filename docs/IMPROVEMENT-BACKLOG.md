@@ -337,8 +337,21 @@ build and tests green before committing.
   does use the cycle-derived value (1 day) instead of a 400-day ownership fallback. Test-only change:
   no production file touched, no rendering, copy, layout or behaviour change. `assembleDebug` and all
   180 unit tests are green (172 before, 8 new).
-- [ ] **E4. Reference matching tests.** Sub-brand match, longest-pattern preference, no match, and a
-  model string that contains two patterns.
+- [x] **E4. Reference matching tests.** Sub-brand match, longest-pattern preference, no match, and a
+  model string that contains two patterns. *Done:* `ReferenceMatchingTest`, 9 tests. The matching loop
+  moved verbatim out of `AssetReferenceRepository` into an internal `ReferenceIndex` built from a
+  `List<ReferenceDevice>`, so the rules can be driven with hand-built entries rather than only the
+  bundled asset; the repository now just loads the asset and delegates, and the loop, the
+  normalisation and the tie-breaking are the same code as before. Pinned: a model string containing
+  two patterns of one entry reports that entry's first listed pattern; when two entries both match,
+  the longer pattern wins; a brand-equal entry beats a longer pattern from another brand (asserted
+  both ways on the same model string, so only the brand input differs); an exact tie keeps the earlier
+  entry; case, spaces and punctuation are ignored on both sides; the device string must equal a
+  pattern rather than merely contain it (`SM-S911` matches, `SM-S911B` does not, with an empty model);
+  a model outside the set and three empty strings match nothing; an entry with no patterns, or with a
+  blank one, never matches; and the real bundled asset still resolves `SM-S911B` to Galaxy S23 through
+  the repository, rejects `Nokia 3310`, and loads all 16 entries. No screen, control, style, copy,
+  navigation or feature change. `assembleDebug` and all 189 unit tests are green (180 before, 9 new).
 - [ ] **E5. Score coverage tests.** Coverage exactly at the 30% floor, and just below it.
 - [ ] **E6. Screenshot regression.** The existing `ScreenshotTest` renders seven screens; assert the
   images are non-blank and that a missing fixture does not throw.
