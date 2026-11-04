@@ -371,8 +371,27 @@ build and tests green before committing.
   `temperatureCelsius`, `securityPatch` and `thermalStatusSupported` parameters to build the sparse
   devices. Test-only change: no production file touched, no rendering, copy, layout or behaviour
   change. `assembleDebug` and all 197 unit tests are green (189 before, 8 new).
-- [ ] **E6. Screenshot regression.** The existing `ScreenshotTest` renders seven screens; assert the
+- [x] **E6. Screenshot regression.** The existing `ScreenshotTest` renders seven screens; assert the
   images are non-blank and that a missing fixture does not throw.
+  *Done:* `ScreenshotTest`, 15 tests (7 before, 8 new). Every render is now measured instead of
+  merely written: the window's decor view is drawn into a bitmap, sampled on a 2-pixel stride, and
+  the screen must be 1078 x 2338 px with at least 100 distinct colours and at least 2% of sampled
+  pixels off the dominant colour. The thresholds sit far from both ends — the densest screen here
+  (dashboard) measures 2500 colours and 64% ink, the sparsest (specifications) 1087 and 7.7%, while
+  a frame with nothing drawn measures one colour and 0% ink — so a capture that silently lost its
+  content fails while an ordinary edit does not. `aBlankFrameIsRejected` renders an empty frame and
+  asserts the check rejects it, so the seven screen assertions cannot pass for a reason unrelated to
+  the screen having been drawn. `captureToImage()` was tried first and does not work here: under
+  Robolectric it times out in `forceRedraw` (`ComposeTimeoutException`, a draw callback the shadow
+  view root never delivers), so the rule is now `createAndroidComposeRule<ComponentActivity>()` and
+  the decor view is drawn directly — the same path Roborazzi's own capture takes. Seven further
+  tests render each screen with a bare `UiState()` — no snapshot, no report, no session, i.e. a
+  missing fixture — and assert a real screen came out (348 to 410 colours, 8.2% to 8.5% ink) rather
+  than only that nothing threw; they publish no PNG, since those states are not part of the
+  documented screenshot set. This is the pixel-level companion to `EmptyStateTest`, which asserts
+  the empty-state text. Test-only change: no production file touched, no rendering, copy, layout or
+  behaviour change, and no published screenshot altered. `assembleDebug` and all 205 unit tests are
+  green (197 before, 8 new).
 
 ## F. Build, size and static analysis
 

@@ -1,10 +1,14 @@
 package com.verifydeviceinfo
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -33,6 +37,7 @@ import com.verifydeviceinfo.ui.screens.PartsScreen
 import com.verifydeviceinfo.ui.screens.SecurityScreen
 import com.verifydeviceinfo.ui.screens.SpecsScreen
 import com.verifydeviceinfo.ui.theme.VerifyDeviceTheme
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -52,7 +57,7 @@ import org.robolectric.annotation.GraphicsMode
 class ScreenshotTest {
 
     @get:Rule
-    val composeRule = createComposeRule()
+    val composeRule = createAndroidComposeRule<ComponentActivity>()
 
     private fun fields(): List<SpecField> = listOf(
         field("identity.manufacturer", "Manufacturer", "samsung", SpecGroup.IDENTITY, "Build.MANUFACTURER"),
@@ -172,7 +177,26 @@ class ScreenshotTest {
         )
     }
 
-    private fun capture(name: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+    /** What a render actually looked like, in enough detail to tell a real screen from a blank one. */
+    private data class RenderStats(
+        val name: String,
+        val width: Int,
+        val height: Int,
+        val distinctColours: Int,
+        val inkFraction: Double
+    )
+
+    /**
+     * Renders [content] and measures the pixels that were drawn.
+     *
+     * The window's decor view is drawn into a bitmap here rather than read back with
+     * `captureToImage`: under Robolectric that API waits for a draw callback the shadow view root
+     * never delivers, so it times out. Drawing the view is the path Roborazzi itself takes, and it
+     * produces the same pixels the published PNG contains. The bitmap is sampled on a fixed stride
+     * rather than pixel by pixel — at 420 dpi a phone window is roughly 2.5 M pixels, and a quarter
+     * of that is already thousands of samples per distinct colour.
+     */
+    private fun renderStats(name: String, content: @Composable () -> Unit): RenderStats {
         composeRule.setContent {
             VerifyDeviceTheme(darkTheme = true) {
                 Surface(
@@ -182,7 +206,81 @@ class ScreenshotTest {
             }
         }
         composeRule.waitForIdle()
+        val view = composeRule.activity.window.decorView
+        assertTrue(
+            "$name: the window was never laid out (${view.width} x ${view.height})",
+            view.width > 0 && view.height > 0
+        )
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        view.draw(Canvas(bitmap))
+        val histogram = HashMap<Int, Int>()
+        var sampled = 0
+        var y = 0
+        while (y < bitmap.height) {
+            var x = 0
+            while (x < bitmap.width) {
+                val argb = bitmap.getPixel(x, y)
+                histogram[argb] = (histogram[argb] ?: 0) + 1
+                sampled++
+                x += SAMPLE_STRIDE
+            }
+            y += SAMPLE_STRIDE
+        }
+        val dominant = histogram.values.maxOrNull() ?: 0
+        return RenderStats(
+            name = name,
+            width = bitmap.width,
+            height = bitmap.height,
+            distinctColours = histogram.size,
+            inkFraction = if (sampled == 0) 0.0 else 1.0 - dominant.toDouble() / sampled
+        )
+    }
+
+    /**
+     * Fails if the capture is blank, empty or the wrong size.
+     *
+     * The window is 411 x 891 dp at 420 dpi, i.e. 1079 x 2339 px; the bounds carry a little slack
+     * so a Robolectric rounding change does not fail every screen at once, while a capture that
+     * silently produced an empty, half-drawn or wrongly-scaled bitmap still fails here.
+     */
+    private fun assertRendered(stats: RenderStats) {
+        assertTrue(
+            "${stats.name}: width ${stats.width} px is not a phone-width capture",
+            stats.width in MIN_WIDTH_PX..MAX_WIDTH_PX
+        )
+        assertTrue(
+            "${stats.name}: height ${stats.height} px is not a phone-height capture",
+            stats.height in MIN_HEIGHT_PX..MAX_HEIGHT_PX
+        )
+        // A blank capture is a single flat colour: no text, no cards, nothing drawn.
+        assertTrue(
+            "${stats.name}: only ${stats.distinctColours} distinct colours — the screen rendered blank",
+            stats.distinctColours >= MIN_DISTINCT_COLOURS
+        )
+        assertTrue(
+            "${stats.name}: ${stats.inkFraction} of sampled pixels differ from the dominant colour — " +
+                "the screen rendered blank",
+            stats.inkFraction >= MIN_INK_FRACTION
+        )
+    }
+
+    /** Renders, asserts the result is a real screen, and publishes the PNG under `docs/screenshots`. */
+    private fun capture(name: String, content: @Composable () -> Unit) {
+        val stats = renderStats(name, content)
         composeRule.onRoot().captureRoboImage("build/outputs/roborazzi/$name.png")
+        assertRendered(stats)
+    }
+
+    /**
+     * Renders with no fixture at all and asserts a real screen came out.
+     *
+     * Every screen has to survive being opened before the first scan has produced a snapshot or a
+     * report — that is the state a fresh install is in — and it has to survive it by drawing its
+     * empty state, not by drawing nothing. No image is published: these states are not part of the
+     * documented screenshot set.
+     */
+    private fun renderWithoutFixture(name: String, content: @Composable () -> Unit) {
+        assertRendered(renderStats(name, content))
     }
 
     @Test
@@ -227,5 +325,85 @@ class ScreenshotTest {
         val state = buildState()
         val viewModel = AppViewModel(ApplicationProvider.getApplicationContext())
         capture("07-diagnostics") { DiagnosticsScreen(state, viewModel, {}, {}) }
+    }
+
+    // ---- A missing fixture must draw an empty state, not a blank frame ------------------------
+
+    private fun viewModel() = AppViewModel(ApplicationProvider.getApplicationContext())
+
+    private val noFixture = UiState()
+
+    @Test
+    fun dashboardWithoutAFixture() {
+        renderWithoutFixture("dashboard-empty") { DashboardScreen(noFixture, viewModel()) {} }
+    }
+
+    @Test
+    fun authenticityWithoutAFixture() {
+        renderWithoutFixture("authenticity-empty") { AuthenticityScreen(noFixture) {} }
+    }
+
+    @Test
+    fun partsWithoutAFixture() {
+        renderWithoutFixture("parts-empty") { PartsScreen(noFixture) {} }
+    }
+
+    @Test
+    fun specificationsWithoutAFixture() {
+        renderWithoutFixture("specifications-empty") { SpecsScreen(noFixture) {} }
+    }
+
+    @Test
+    fun securityWithoutAFixture() {
+        renderWithoutFixture("security-empty") { SecurityScreen(noFixture) {} }
+    }
+
+    @Test
+    fun batteryWithoutAFixture() {
+        renderWithoutFixture("battery-empty") { BatteryScreen(noFixture) {} }
+    }
+
+    @Test
+    fun diagnosticsWithoutAFixture() {
+        renderWithoutFixture("diagnostics-empty") { DiagnosticsScreen(noFixture, viewModel(), {}, {}) }
+    }
+
+    /**
+     * Proves the blank check has teeth: an empty frame must fail it, or every screen above passes
+     * for a reason that has nothing to do with the screen having been drawn.
+     */
+    @Test
+    fun aBlankFrameIsRejected() {
+        val stats = renderStats("blank") {}
+        assertTrue(
+            "an empty frame measured ${stats.distinctColours} colours and ${stats.inkFraction} ink, " +
+                "which the non-blank check would accept",
+            stats.distinctColours < MIN_DISTINCT_COLOURS || stats.inkFraction < MIN_INK_FRACTION
+        )
+    }
+
+    private companion object {
+        /** Sample every second pixel in both axes: a quarter of the bitmap, all of its structure. */
+        const val SAMPLE_STRIDE = 2
+
+        // 411 x 891 dp at 420 dpi is 1079 x 2339 px; +-10% covers a density or rounding change.
+        const val MIN_WIDTH_PX = 1000
+        const val MAX_WIDTH_PX = 1200
+        const val MIN_HEIGHT_PX = 2200
+        const val MAX_HEIGHT_PX = 2500
+
+        /**
+         * Text, chips and cards on a flat background produce hundreds of colours; the sparsest
+         * screen here measures 348 and a blank frame produces one. The floor is set at 100, which
+         * still rejects a frame that lost its text, icons and cards but kept its background.
+         */
+        const val MIN_DISTINCT_COLOURS = 100
+
+        /**
+         * Share of sampled pixels that are not the dominant colour. The sparsest screen here
+         * measures 0.077 (a title, an empty-state card and the app bar); a blank frame measures 0.0.
+         * The floor is a quarter of the sparsest real screen.
+         */
+        const val MIN_INK_FRACTION = 0.02
     }
 }
