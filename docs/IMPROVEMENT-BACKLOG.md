@@ -352,7 +352,25 @@ build and tests green before committing.
   blank one, never matches; and the real bundled asset still resolves `SM-S911B` to Galaxy S23 through
   the repository, rejects `Nokia 3310`, and loads all 16 entries. No screen, control, style, copy,
   navigation or feature change. `assembleDebug` and all 189 unit tests are green (180 before, 9 new).
-- [ ] **E5. Score coverage tests.** Coverage exactly at the 30% floor, and just below it.
+- [x] **E5. Score coverage tests.** Coverage exactly at the 30% floor, and just below it.
+  *Done:* `ScoreCoverageTest`, 8 tests, each driven through `DefaultScoreEngine.score` with an explicit
+  parts and integrity report so only the weights that decide coverage vary. **The item's first clause
+  is unreachable as written:** coverage is `(availableWeight / totalWeight * 100)` rounded, and no
+  reachable subset of any group's weights produces a ratio that rounds to 30 — the tightest pair is
+  22% below and 33% above. The floor is therefore pinned at those, which is the strongest statement
+  the engine supports without a behaviour change. Pinned: battery at 22% (charge cycles only) withholds
+  the score, band UNKNOWN, summary naming the 22%; at 33% (reported health only) it scores 100/GOOD.
+  The same pair for Display and sensors (22% = a lone sensor test, 33% = configuration plus refresh
+  rate) and for Performance (22% = the low-RAM flag and the core count, which are never missing, 44%
+  once the thermal reading is present). An empty parts report withholds both parts-derived groups at
+  0%, and Repair evidence completeness scores 20/POOR at 33% from a single recorded diagnostic when no
+  component could be inspected. Two groups can never be withheld, which is now pinned rather than
+  assumed: Hardware health bottoms out at 63% because four of its inputs are never null, and Software
+  and security at 50% for the same reason. The seven group names and their order are asserted as a
+  list, which is what the report screen's score count line renders. `TestFixtures` gained nullable
+  `temperatureCelsius`, `securityPatch` and `thermalStatusSupported` parameters to build the sparse
+  devices. Test-only change: no production file touched, no rendering, copy, layout or behaviour
+  change. `assembleDebug` and all 197 unit tests are green (189 before, 8 new).
 - [ ] **E6. Screenshot regression.** The existing `ScreenshotTest` renders seven screens; assert the
   images are non-blank and that a missing fixture does not throw.
 

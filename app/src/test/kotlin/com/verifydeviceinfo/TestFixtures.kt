@@ -169,12 +169,13 @@ object TestFixtures {
         health: String = "Good",
         healthCode: Int = 2,
         healthPercent: Int? = 95,
-        cycleCount: Int? = 120
+        cycleCount: Int? = 120,
+        temperatureCelsius: Float? = 31.0f
     ) = BatteryFacts(
         percent = 100,
         health = health,
         healthCode = healthCode,
-        temperatureCelsius = 31.0f,
+        temperatureCelsius = temperatureCelsius,
         voltageMillivolts = 4300,
         technology = "Li-ion",
         plugged = "Not charging",
@@ -210,7 +211,11 @@ object TestFixtures {
         signatureDigestSha256 = "AA:BB"
     )
 
-    fun software(securityPatch: String = "2026-06-01") = SoftwareFacts(
+    fun software(
+        securityPatch: String? = "2026-06-01",
+        thermalStatus: String = "None",
+        thermalStatusSupported: Boolean = true
+    ) = SoftwareFacts(
         androidRelease = "14",
         apiLevel = 34,
         securityPatch = securityPatch,
@@ -222,8 +227,8 @@ object TestFixtures {
         packageVisibilityRestricted = true,
         uptimeMillis = 3_600_000L,
         bootTimeMillis = NOW - 3_600_000L,
-        thermalStatus = "None",
-        thermalStatusSupported = true,
+        thermalStatus = thermalStatus,
+        thermalStatusSupported = thermalStatusSupported,
         locale = "en-IN",
         timeZone = "Asia/Kolkata"
     )
