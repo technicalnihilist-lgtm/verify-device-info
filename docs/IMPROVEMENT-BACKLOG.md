@@ -302,8 +302,26 @@ build and tests green before committing.
   `redacted` flag itself; the value is still `REDACTED` when a serial was actually read. Export
   content only — no screen, control, style, navigation, copy or feature change. `assembleDebug` and
   all 155 unit tests are green (142 before, 13 new).
-- [ ] **E2. Parts provider matrix test.** One test per `ComponentState`, asserting the state chosen for
-  a given evidence set.
+- [x] **E2. Parts provider matrix test.** One test per `ComponentState`, asserting the state chosen for
+  a given evidence set. *Done:* `PartsProviderMatrixTest`, 17 tests, one or more per state the provider
+  can actually emit, each naming the evidence set and asserting the resulting state rather than merely
+  that `assess` returned. UNABLE_TO_INSPECT: no reference, an unreadable display configuration, and the
+  functional-only row before any test has run — all three also pin `Confidence.NONE` and the single
+  `HEURISTIC` placeholder evidence. NO_ANOMALY_UNVERIFIED: a device matching its reference on every row
+  at once, with confidence pinned to LOW so a matching number can never be promoted to proof.
+  POSSIBLE_REPLACEMENT: a lower-resolution panel, a panel differing only on the short side, a non-good
+  battery health code, capacity under 80% with good reported health (LOW confidence, not MEDIUM),
+  fewer camera modules than the reference, storage outside the 12% tolerance, a reference sensor that
+  was not enumerated, and inconsistent identity strings with matching hardware. POSSIBLE_COUNTERFEIT:
+  identity disagreement plus two independent hardware mismatches, and the boundary below it — one
+  mismatch plus the same identity warning stays POSSIBLE_REPLACEMENT, and three hardware mismatches
+  with consistent identity never reach counterfeit at all. ORIGINALITY_VERIFIED is asserted **never to
+  be emitted** across eleven scenarios, which is the invariant the five-state model depends on: Android
+  exposes no component identity, so the app must never claim a part is genuine. The same sweep pins
+  that every component carries a non-blank explanation and at least one evidence item, and that
+  `Confidence.NONE` appears exactly on UNABLE_TO_INSPECT. A separate test pins the seven components and
+  their order. Test-only change: no production file touched, no rendering, copy, layout or behaviour
+  change. `assembleDebug` and all 172 unit tests are green (155 before, 17 new).
 - [ ] **E3. Age estimator boundary tests.** Launch date unknown, build date unknown, purchase date in
   the future, cycle count zero.
 - [ ] **E4. Reference matching tests.** Sub-brand match, longest-pattern preference, no match, and a
