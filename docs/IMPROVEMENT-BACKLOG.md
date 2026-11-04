@@ -278,8 +278,30 @@ build and tests green before committing.
 
 ## E. Tests — raise confidence without a device
 
-- [ ] **E1. JSON report round-trip test.** Assert every documented key exists and that redaction
-  replaces exactly the sensitive fields.
+- [x] **E1. JSON report round-trip test.** Assert every documented key exists and that redaction
+  replaces exactly the sensitive fields. *Done:* `ReportJsonTest`, 13 tests over a report built from
+  the real four engines, parsed back with `kotlinx.serialization` and compared leaf by leaf. The
+  contract is pinned at every level: the twenty top-level keys, the key set of each nested object
+  (`platform`, `identity`, `operatingSystem`, a specification, a finding, an evidence item, a
+  component, `age`, a check, a score, a score input, a diagnostic, an `unknownOrInaccessible`
+  entry), the seven documented score names, the exact contents of `unknownOrInaccessible`
+  (NOT_SUPPORTED + UNVERIFIED + PERMISSION_REQUIRED, nothing else), `collectionErrors` present only
+  when non-empty, nulls emitted as JSON null rather than dropped, and byte-identical repeat encoding.
+  Redaction is asserted as a diff: both encodings are flattened to path → leaf maps, the key sets
+  must be equal, and the set of leaves that differ must be exactly `redacted` plus `identity.serial`
+  plus the `specifications[i].value` of every field flagged `sensitive` — nothing more, nothing less
+  — with every changed value being `REDACTED`. A separate test asserts the fixture's sensitive keys
+  are exactly the three identifiers `docs/PRIVACY.md` promises to redact (serial, Bluetooth adapter
+  name, signing-certificate digest), and that none of their raw values appears anywhere in the
+  redacted text.
+  **The test found a real bug and it is fixed:** `identity.serial` was written as `"REDACTED"`
+  whenever `redacted` was true, even when the serial was never collected — which is the normal case,
+  since Android 10+ hides the serial from unprivileged apps. Every ordinary export therefore claimed
+  that an identifier existed and had been withheld. A null serial is now exported as `null` in both
+  encodings, so the redacted and unredacted exports of a serial-less device differ only in the
+  `redacted` flag itself; the value is still `REDACTED` when a serial was actually read. Export
+  content only — no screen, control, style, navigation, copy or feature change. `assembleDebug` and
+  all 155 unit tests are green (142 before, 13 new).
 - [ ] **E2. Parts provider matrix test.** One test per `ComponentState`, asserting the state chosen for
   a given evidence set.
 - [ ] **E3. Age estimator boundary tests.** Launch date unknown, build date unknown, purchase date in

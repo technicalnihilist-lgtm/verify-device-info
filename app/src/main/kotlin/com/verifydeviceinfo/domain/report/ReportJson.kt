@@ -76,9 +76,16 @@ object ReportJson {
             put("buildType", report.snapshot.identity.buildType)
             putStr("socManufacturer", report.snapshot.identity.socManufacturer)
             putStr("socModel", report.snapshot.identity.socModel)
+            // A serial the platform did not disclose stays null even in a redacted export:
+            // "REDACTED" would assert that an identifier existed and was withheld, which is exactly
+            // the kind of invented fact this report exists to avoid.
             putStr(
                 "serial",
-                if (redacted) "REDACTED" else report.snapshot.identity.serial
+                when {
+                    report.snapshot.identity.serial == null -> null
+                    redacted -> "REDACTED"
+                    else -> report.snapshot.identity.serial
+                }
             )
         }
 
