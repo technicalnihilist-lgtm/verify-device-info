@@ -322,8 +322,21 @@ build and tests green before committing.
   `Confidence.NONE` appears exactly on UNABLE_TO_INSPECT. A separate test pins the seven components and
   their order. Test-only change: no production file touched, no rendering, copy, layout or behaviour
   change. `assembleDebug` and all 172 unit tests are green (155 before, 17 new).
-- [ ] **E3. Age estimator boundary tests.** Launch date unknown, build date unknown, purchase date in
-  the future, cycle count zero.
+- [x] **E3. Age estimator boundary tests.** Launch date unknown, build date unknown, purchase date in
+  the future, cycle count zero. *Done:* `AgeEstimatorTest`, 8 tests added (4 before, 12 total). A
+  reference entry with a blank release date and one with an unparseable `releaseDate` (`Q1 2023`) both
+  leave `modelLaunchAgeDays` null while the firmware age survives, and the note says no reference
+  launch date is available. A null `buildTimeMillis` leaves `firmwareBuildAgeDays` and
+  `firmwareBuildDate` null — pinned explicitly, because the report keeps the date null rather than a
+  placeholder and `AgeScreen` is what renders `"Unknown"` — with confidence still LOW since the launch
+  date is known. With launch date, build date and purchase date all missing, no cycle count and a blank
+  security patch, every age field is null and confidence is NONE. A purchase date 30 days in the future
+  gives `ownershipAgeDays` 0, never a negative duration, and the usage age is 0 rather than negative
+  when it falls back to that ownership value. A cycle count of 0 is treated as no cycle count: usage
+  age falls back to ownership age when a purchase date exists and is null otherwise, while a count of 1
+  does use the cycle-derived value (1 day) instead of a 400-day ownership fallback. Test-only change:
+  no production file touched, no rendering, copy, layout or behaviour change. `assembleDebug` and all
+  180 unit tests are green (172 before, 8 new).
 - [ ] **E4. Reference matching tests.** Sub-brand match, longest-pattern preference, no match, and a
   model string that contains two patterns.
 - [ ] **E5. Score coverage tests.** Coverage exactly at the 30% floor, and just below it.
