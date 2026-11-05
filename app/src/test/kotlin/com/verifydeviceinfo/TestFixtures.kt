@@ -106,17 +106,22 @@ object TestFixtures {
         pixelSizeMicrons = 1.0
     )
 
-    fun sensor(category: String, name: String = "Test $category") = SensorFacts(
+    fun sensor(
+        category: String,
+        name: String = "Test $category",
+        type: Int = 1,
+        wakeUp: Boolean = false
+    ) = SensorFacts(
         name = name,
         vendor = "Test Vendor",
         version = 1,
-        type = 1,
+        type = type,
         stringType = "android.sensor.${category.lowercase()}",
         category = category,
         maxRange = 19.6f,
         resolution = 0.001f,
         powerMilliAmp = 0.15f,
-        wakeUpSensor = false,
+        wakeUpSensor = wakeUp,
         reportingMode = "Continuous"
     )
 

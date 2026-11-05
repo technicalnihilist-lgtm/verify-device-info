@@ -419,6 +419,8 @@ build and tests green before committing.
   both attempts and the task restarts from zero when the call is killed, so no minified APK was ever
   produced and nothing in the release path could be measured or checked. Reverted; the item stays
   open until it runs on a host with more memory than a single Gradle call can use.
+  *Passed over (6 Nov run):* unchanged — this sandbox is still 2 cores / 2 GB, where a cold
+  `assembleDebug` alone needs four 300 s calls, so `minifyReleaseWithR8` cannot be run or checked here.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -443,6 +445,8 @@ build and tests green before committing.
   alone (after the dependency downloads were cached) exceeds a 236 s call, and the analysis is not
   resumable. Nothing was triaged, so nothing was suppressed: a baseline written from a half-finished
   analysis would hide real findings. Needs a machine with more cores, or `lint` run per-module in CI.
+  *Passed over (6 Nov run):* same constraint — a single `lintAnalyzeDebug` does not fit in a 300 s call
+  on 2 cores, and a half-finished analysis cannot be triaged honestly.
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -465,6 +469,8 @@ build and tests green before committing.
   *Deferred (5 Nov, second run):* every before/after number the A–E items produced is already written
   into this file next to the item, so a second copy today would only duplicate them and drift. Write it
   when an item lands whose measurement is not already recorded here.
+  *Passed over (6 Nov run):* H4's numbers are recorded in its own entry, so the duplication argument
+  still holds; this waits for an item whose measurement has no home in this file.
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
   makes no new claim, and `LIMITATIONS.md` already covers reference-data coverage and per-API
@@ -515,8 +521,27 @@ would be worse than one honest one.
   inspected-and-clean, which is what it means. Three tests added: absent code, unknown code, and a
   guard that an explicit code 2 still reports `NO_ANOMALY_UNVERIFIED`. `assembleDebug` and all 215 unit
   tests green (212 before, 3 new). No screen, control, style, layout or copy added.
-- [ ] **H4. De-duplicate wake-up sensors.** `getSensorList(TYPE_ALL)` returns both variants on many
-  devices, inflating the count. Count logical sensors once.
+- [x] **H4. De-duplicate wake-up sensors.** `getSensorList(TYPE_ALL)` returns both variants on many
+  devices, inflating the count. Count logical sensors once. *Done:* a wake-up sensor is not a second
+  sensor — it is the same physical device published by the HAL under a second handle of the **same
+  type** so it can batch and deliver while the AP is suspended, so a device with 22 sensors enumerates
+  around 40 handles. New `core/util/SensorInventory.kt` holds `logicalSensorCount(sensors)`: a type that
+  publishes at least one ordinary handle is counted by those handles alone (two chips of one type still
+  count as two), and a wake-up handle is counted only for a type that publishes nothing else, because
+  some sensors — significant motion, for one — are wake-up only and must not vanish. It keys on
+  `SensorFacts.type` and `wakeUpSensor`, not on vendor or name strings, which OEMs spell differently
+  ("… Wakeup" vs the same name twice), and it is a nested scan over a few dozen entries rather than a
+  `HashSet`, so it allocates nothing. `SensorCollector` now reports it as "Sensors enumerated", and
+  `DefaultScoreEngine` uses the same count for its "Sensors enumerated" score input and its `< 4`
+  threshold — the two screens said 40 and 22 about the same device before. Sensor detail rows, the
+  per-category rows and the `SensorFacts` list are untouched, so the enumeration, the report JSON and
+  every other derived value are unchanged; only the two counts move, and only on devices that publish
+  wake-up variants. Seven tests added (`SensorInventoryTest` ×6: pair collapsed, wake-up-only type kept,
+  two chips of one type kept at two, wake-up handle dropped wherever it is enumerated, empty list,
+  all-ordinary list; `ScoreEngineTest` ×1: 4 handles = 2 sensors = "2 sensors" and below the
+  four-sensor threshold). `assembleDebug` and all 222 unit tests green (215 before). No screen, control,
+  style, layout or copy change. Not measured on hardware: no device is available here, so the
+  before/after is the fixture case (4 handles → 2 sensors), not a handset reading.
 - [ ] **H5. Megapixel source precedence.** When the stream configuration and the pixel array disagree,
   document which one is reported and why, and expose the other value.
 - [ ] **H6. Replace deprecated `getRealMetrics`.** Use `WindowMetrics` on API 30+ with the old path as

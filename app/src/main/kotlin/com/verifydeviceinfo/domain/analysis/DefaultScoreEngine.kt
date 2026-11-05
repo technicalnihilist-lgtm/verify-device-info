@@ -11,6 +11,7 @@ import com.verifydeviceinfo.core.model.ScoreInput
 import com.verifydeviceinfo.core.model.ScoreResult
 import com.verifydeviceinfo.core.model.ComponentState
 import com.verifydeviceinfo.core.util.Formatters
+import com.verifydeviceinfo.core.util.logicalSensorCount
 import com.verifydeviceinfo.domain.EvidenceAndConfidenceEngine
 import kotlin.math.roundToInt
 
@@ -98,6 +99,9 @@ class DefaultScoreEngine : EvidenceAndConfidenceEngine {
                 if (hardware.cameras.isEmpty()) 0 else 100,
                 "${hardware.cameras.size} cameras"
             )
+            // Counted the way the hardware screen counts them: a wake-up handle is the same
+            // sensor as its ordinary handle, so the raw enumeration is not the sensor count.
+            val sensorCount = logicalSensorCount(hardware.sensors)
             acc.add(
                 "Sensors enumerated",
                 2f,
@@ -107,11 +111,11 @@ class DefaultScoreEngine : EvidenceAndConfidenceEngine {
                 // exposes no sensors read as failed hardware, and contradicted the "Sensor count"
                 // input below, which already excludes the same observation.
                 when {
-                    hardware.sensors.isEmpty() -> null
-                    hardware.sensors.size < 4 -> 50
+                    sensorCount == 0 -> null
+                    sensorCount < 4 -> 50
                     else -> 100
                 },
-                "${hardware.sensors.size} sensors"
+                "$sensorCount sensors"
             )
             acc.add(
                 "Biometric hardware",

@@ -104,6 +104,25 @@ class ScoreEngineTest {
     }
 
     @Test
+    fun `wake-up handles do not inflate the sensor score input`() {
+        val handles = listOf(
+            TestFixtures.sensor("Accelerometer", type = 1),
+            TestFixtures.sensor("Accelerometer", type = 1, wakeUp = true),
+            TestFixtures.sensor("Gyroscope", type = 4),
+            TestFixtures.sensor("Gyroscope", type = 4, wakeUp = true)
+        )
+        val inflated = scores(
+            TestFixtures.snapshot(hardware = TestFixtures.hardware(sensors = handles)),
+            DiagnosticSession()
+        ).byName("Hardware health")!!
+
+        // Four handles are two sensors, and the score input has to say the same thing the hardware
+        // screen says. Counting handles scored this as 100 on the four-sensor threshold.
+        assertEquals("2 sensors", inflated.inputs.first { it.label == "Sensors enumerated" }.value)
+        assertTrue(inflated.score!! < scores(TestFixtures.snapshot(), DiagnosticSession()).byName("Hardware health")!!.score!!)
+    }
+
+    @Test
     fun `running a failing test lowers hardware health`() {
         val clean = scores(TestFixtures.snapshot(), DiagnosticSession())
         val failing = scores(

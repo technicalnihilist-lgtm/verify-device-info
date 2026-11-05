@@ -7,6 +7,7 @@ import com.verifydeviceinfo.core.model.Confidence
 import com.verifydeviceinfo.core.model.SensorFacts
 import com.verifydeviceinfo.core.model.SpecField
 import com.verifydeviceinfo.core.model.SpecGroup
+import com.verifydeviceinfo.core.util.logicalSensorCount
 import java.util.Locale
 
 /** Enumerates every sensor the sensor service reports, with vendor strings intact. */
@@ -53,8 +54,8 @@ class SensorCollector(private val context: Context) {
         }
 
         fields += FieldBuilder.value(
-            "sensor.count", "Sensors enumerated", sensors.size.toString(), SpecGroup.SENSOR,
-            "SensorManager.getSensorList(TYPE_ALL)"
+            "sensor.count", "Sensors enumerated", logicalSensorCount(facts).toString(),
+            SpecGroup.SENSOR, "SensorManager.getSensorList(TYPE_ALL)"
         )
 
         val grouped = facts.groupBy { it.category }
