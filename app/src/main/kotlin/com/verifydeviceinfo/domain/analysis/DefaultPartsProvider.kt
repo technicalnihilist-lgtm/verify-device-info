@@ -84,10 +84,14 @@ class DefaultPartsProvider : PartsVerificationProvider {
         }
 
         // ---- Battery -------------------------------------------------------
+        // Codes 0 (the sticky intent carried no EXTRA_HEALTH) and 1 (BATTERY_HEALTH_UNKNOWN) are the
+        // two ways the platform says "no reading". Neither is evidence in either direction: an absent
+        // code is not a healthy pack, and an unknown one is not a replaced pack.
         val healthCode = battery.healthCode
         val healthPercent = battery.healthPercent
+        val healthReported = healthCode > 1
         components += when {
-            healthCode != 2 && healthCode > 0 -> ComponentAssessment(
+            healthReported && healthCode != 2 -> ComponentAssessment(
                 component = "Battery",
                 state = ComponentState.POSSIBLE_REPLACEMENT,
                 explanation = "The battery service reports health '${battery.health}'. A non-good health " +
@@ -118,7 +122,7 @@ class DefaultPartsProvider : PartsVerificationProvider {
                 ),
                 confidence = Confidence.LOW
             )
-            else -> ComponentAssessment(
+            healthCode == 2 -> ComponentAssessment(
                 component = "Battery",
                 state = ComponentState.NO_ANOMALY_UNVERIFIED,
                 explanation = "The battery reports good health" +
@@ -134,6 +138,12 @@ class DefaultPartsProvider : PartsVerificationProvider {
                     )
                 ),
                 confidence = Confidence.LOW
+            )
+            else -> unable(
+                "Battery",
+                "The battery service reported no usable health code, so the pack's condition could not " +
+                    "be assessed. Missing data is a platform reporting limitation, not an indication " +
+                    "that the cell is original or replaced."
             )
         }
 

@@ -413,6 +413,12 @@ build and tests green before committing.
   serializer — so the keep-rule risk that held this item back is smaller than assumed; the only
   reflective lookups are framework classes (`android.os.SystemProperties`,
   `com.android.internal.os.PowerProfile`) that R8 never renames.
+  *Re-tried (5 Nov, third run):* `isMinifyEnabled = true` plus keep rules were applied again on a
+  host with warm transform caches and a 1750 MB daemon heap — the heap everything else in the build
+  now needs on this 2 GB / 2-core sandbox. `:app:minifyReleaseWithR8` alone exceeded a 271 s call on
+  both attempts and the task restarts from zero when the call is killed, so no minified APK was ever
+  produced and nothing in the release path could be measured or checked. Reverted; the item stays
+  open until it runs on a host with more memory than a single Gradle call can use.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -492,8 +498,23 @@ would be worse than one honest one.
   previously showed "Unavailable". `assembleDebug` and all 212 unit tests green (205 before, 7 new).
 - [ ] **H2. SoC manufacturer cross-check.** Compare `Build.SOC_MANUFACTURER` with the vendor implied by
   `ro.soc.model` and report a mismatch as `UNVERIFIED`, not as a warning.
-- [ ] **H3. Battery health code 0 means unknown, not good.** `BATTERY_HEALTH_UNKNOWN` is currently
-  scored like a healthy pack; treat it as missing evidence.
+  *Skipped (5 Nov, third run):* every shape of this lands in `DefaultAuthenticityEngine` as a new
+  finding — a new card with new title, explanation and evidence lines on the authenticity screen —
+  so it needs a visible change. It also needs a vendor-implied-by-SoC-name table, which is a data
+  set this app does not carry. Belongs to a design pass, not this one.
+- [x] **H3. Battery health code 0 means unknown, not good.** `BATTERY_HEALTH_UNKNOWN` is currently
+  scored like a healthy pack; treat it as missing evidence. *Done:* in `DefaultPartsProvider` the
+  battery branch tested `healthCode != 2 && healthCode > 0`, which sent code 1 (`BATTERY_HEALTH_UNKNOWN`)
+  to `POSSIBLE_REPLACEMENT` — a warning about a pack the platform never assessed — while codes 0 and 1
+  fell through to the `else` branch that says "The battery reports good health". The replacement branch
+  now requires `healthCode > 1`, the good-health branch requires `healthCode == 2` exactly, and an
+  absent or unknown code reaches the existing `unable(...)` helper as `UNABLE_TO_INSPECT` with
+  `Confidence.NONE`. A measured capacity below 80% still wins over a missing code, as before, and
+  `DefaultScoreEngine` already excluded codes 0 and 1 from the "Reported health" input, so no score
+  input changes; the component-confidence score now counts the pack as uninspected rather than as
+  inspected-and-clean, which is what it means. Three tests added: absent code, unknown code, and a
+  guard that an explicit code 2 still reports `NO_ANOMALY_UNVERIFIED`. `assembleDebug` and all 215 unit
+  tests green (212 before, 3 new). No screen, control, style, layout or copy added.
 - [ ] **H4. De-duplicate wake-up sensors.** `getSensorList(TYPE_ALL)` returns both variants on many
   devices, inflating the count. Count logical sensors once.
 - [ ] **H5. Megapixel source precedence.** When the stream configuration and the pixel array disagree,
