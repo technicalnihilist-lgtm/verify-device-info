@@ -3,7 +3,6 @@ package com.verifydeviceinfo.data.android.collect
 import android.os.Build
 import com.verifydeviceinfo.core.model.Confidence
 import com.verifydeviceinfo.core.model.DeviceIdentity
-import com.verifydeviceinfo.core.model.DiagnosticStatus
 import com.verifydeviceinfo.core.model.SpecField
 import com.verifydeviceinfo.core.model.SpecGroup
 import com.verifydeviceinfo.core.model.Verification

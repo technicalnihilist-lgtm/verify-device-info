@@ -1,6 +1,5 @@
 package com.verifydeviceinfo.domain.analysis
 
-import com.verifydeviceinfo.core.model.Confidence
 import com.verifydeviceinfo.core.model.DeviceSnapshot
 import com.verifydeviceinfo.core.model.DiagnosticStatus
 import com.verifydeviceinfo.core.model.Evidence

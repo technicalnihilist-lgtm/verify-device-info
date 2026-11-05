@@ -15,7 +15,6 @@ import com.verifydeviceinfo.data.android.diagnostics.SensorProbe
 import com.verifydeviceinfo.domain.HardwareDiagnosticsEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.util.Locale
 
 /**

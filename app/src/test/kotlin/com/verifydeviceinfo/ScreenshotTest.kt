@@ -27,7 +27,6 @@ import com.verifydeviceinfo.domain.analysis.DefaultIntegrityAnalyzer
 import com.verifydeviceinfo.domain.analysis.DefaultPartsProvider
 import com.verifydeviceinfo.domain.analysis.DefaultScoreEngine
 import com.verifydeviceinfo.ui.AppViewModel
-import com.verifydeviceinfo.ui.Screen
 import com.verifydeviceinfo.ui.UiState
 import com.verifydeviceinfo.ui.screens.AuthenticityScreen
 import com.verifydeviceinfo.ui.screens.BatteryScreen

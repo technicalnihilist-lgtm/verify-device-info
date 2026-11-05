@@ -1,6 +1,5 @@
 package com.verifydeviceinfo.data.android.collect
 
-import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -14,7 +13,6 @@ import android.telephony.TelephonyManager
 import com.verifydeviceinfo.core.model.Confidence
 import com.verifydeviceinfo.core.model.SpecField
 import com.verifydeviceinfo.core.model.SpecGroup
-import com.verifydeviceinfo.core.model.Verification
 
 data class ConnectivityFacts(
     val wifiAvailable: Boolean,
@@ -72,7 +70,7 @@ class ConnectivityCollector(private val context: Context) {
         // Bluetooth adapter state (needs BLUETOOTH_CONNECT from Android 12).
         try {
             val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
-            val adapter = manager?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+            val adapter = manager?.adapter
             if (adapter != null) {
                 val state = try {
                     if (adapter.isEnabled) "Enabled" else "Disabled"

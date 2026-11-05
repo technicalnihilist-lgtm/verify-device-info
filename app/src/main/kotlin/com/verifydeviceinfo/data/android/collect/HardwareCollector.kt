@@ -3,7 +3,6 @@ package com.verifydeviceinfo.data.android.collect
 import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.PackageManager
-import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Environment
 import android.os.StatFs
@@ -286,7 +285,15 @@ class HardwareCollector(
             emptyList()
         } else {
             try {
-                display.hdrCapabilities.supportedHdrTypes.map {
+                // HdrCapabilities.supportedHdrTypes is deprecated in API 34 in favour of the
+                // current mode's list; both read the same display data.
+                val hdrTypes: IntArray = if (Build.VERSION.SDK_INT >= 34) {
+                    display.mode?.supportedHdrTypes ?: IntArray(0)
+                } else {
+                    @Suppress("DEPRECATION")
+                    display.hdrCapabilities?.supportedHdrTypes ?: IntArray(0)
+                }
+                hdrTypes.map {
                     when (it) {
                         Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION -> "Dolby Vision"
                         Display.HdrCapabilities.HDR_TYPE_HDR10 -> "HDR10"

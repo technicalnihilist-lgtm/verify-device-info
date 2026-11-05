@@ -45,6 +45,11 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    // The Activity Result API would replace this callback, but the permission flow is owned by the
+    // process-scoped AndroidPermissionManager, which reports results back by request code and keeps
+    // a request log; rewiring it is a behaviour change, not a warning fix. The classic callback is
+    // still delivered on every supported API level (26-35).
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<String>,

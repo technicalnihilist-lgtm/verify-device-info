@@ -95,10 +95,13 @@ class AudioCollector(private val context: Context) {
         fields += FieldBuilder.value(
             "audio.hapticFeedback", "Haptic feedback setting",
             try {
-                if (android.provider.Settings.System.getInt(
-                        context.contentResolver, android.provider.Settings.System.HAPTIC_FEEDBACK_ENABLED, 1
-                    ) == 1
-                ) "Enabled" else "Disabled"
+                // The setting key is deprecated without a replacement; the row still reports the
+                // same stored value, and the key name is part of the row's own label.
+                @Suppress("DEPRECATION")
+                val hapticFeedback = android.provider.Settings.System.getInt(
+                    context.contentResolver, android.provider.Settings.System.HAPTIC_FEEDBACK_ENABLED, 1
+                )
+                if (hapticFeedback == 1) "Enabled" else "Disabled"
             } catch (e: Exception) {
                 null
             },

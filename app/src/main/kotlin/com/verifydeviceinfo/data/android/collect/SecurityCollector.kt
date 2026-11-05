@@ -343,6 +343,10 @@ class SecurityCollector(
             val key: SecretKey = generator.generateKey()
             val factory = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
             val info = factory.getKeySpec(key, KeyInfo::class.java) as KeyInfo
+            // isInsideSecureHardware is deprecated in favour of KeyInfo.securityLevel (API 31+),
+            // but securityLevel reports nothing below API 31 and its levels are not the same
+            // boolean, so adopting it would change the value this evidence reports on upgrade.
+            @Suppress("DEPRECATION")
             val insideHardware = info.isInsideSecureHardware
             val attestation = keyStore.getCertificateChain(alias)?.isNotEmpty() == true
             try {

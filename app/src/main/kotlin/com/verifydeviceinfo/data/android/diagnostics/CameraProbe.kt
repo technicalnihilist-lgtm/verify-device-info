@@ -5,9 +5,13 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.params.OutputConfiguration
+import android.hardware.camera2.params.SessionConfiguration
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Surface
+import java.util.concurrent.Executor
 
 /**
  * Live camera preview and torch control for the interactive camera test.
@@ -60,31 +64,44 @@ class CameraProbe(private val context: Context) {
                             val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                                 addTarget(surface)
                             }
-                            camera.createCaptureSession(
-                                listOf(surface),
-                                object : CameraCaptureSession.StateCallback() {
-                                    override fun onConfigured(configured: CameraCaptureSession) {
-                                        if (!sessions.admit(sessionToken, configured)) return
-                                        session = configured
-                                        try {
-                                            configured.setRepeatingRequest(
-                                                request.build(), null, handler
-                                            )
-                                        } catch (e: Exception) {
-                                            onError("Preview request failed: ${e.message}")
-                                        }
+                            val callback = object : CameraCaptureSession.StateCallback() {
+                                override fun onConfigured(configured: CameraCaptureSession) {
+                                    if (!sessions.admit(sessionToken, configured)) return
+                                    session = configured
+                                    try {
+                                        configured.setRepeatingRequest(
+                                            request.build(), null, handler
+                                        )
+                                    } catch (e: Exception) {
+                                        onError("Preview request failed: ${e.message}")
                                     }
+                                }
 
-                                    override fun onConfigureFailed(failed: CameraCaptureSession) {
-                                        // A session that failed to configure still has to be closed.
-                                        closeQuietly(failed)
-                                        if (sessions.isCurrent(sessionToken)) {
-                                            onError("Camera session configuration failed.")
-                                        }
+                                override fun onConfigureFailed(failed: CameraCaptureSession) {
+                                    // A session that failed to configure still has to be closed.
+                                    closeQuietly(failed)
+                                    if (sessions.isCurrent(sessionToken)) {
+                                        onError("Camera session configuration failed.")
                                     }
-                                },
-                                handler
-                            )
+                                }
+                            }
+                            val outputs = listOf(surface)
+                            if (Build.VERSION.SDK_INT >= 28) {
+                                // SessionConfiguration is the non-deprecated way to open a regular
+                                // session; the executor is the same main-thread handler as before.
+                                camera.createCaptureSession(
+                                    SessionConfiguration(
+                                        SessionConfiguration.SESSION_REGULAR,
+                                        outputs.map { OutputConfiguration(it) },
+                                        Executor { command -> handler.post(command) },
+                                        callback
+                                    )
+                                )
+                            } else {
+                                // API 26-27 have no SessionConfiguration overload.
+                                @Suppress("DEPRECATION")
+                                camera.createCaptureSession(outputs, callback, handler)
+                            }
                         } catch (e: Exception) {
                             onError("Could not start preview: ${e.message}")
                         }

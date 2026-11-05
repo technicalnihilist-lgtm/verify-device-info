@@ -2,6 +2,7 @@ package com.verifydeviceinfo
 
 import com.verifydeviceinfo.core.util.ScanCoordinator
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.advanceTimeBy
@@ -17,6 +18,7 @@ import org.junit.Test
  * app out of scanning for the rest of the process. These pin the replacement: newest request wins,
  * the older one is cancelled, and a superseded scan is not allowed to publish.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ScanCoordinatorTest {
 
     @Test

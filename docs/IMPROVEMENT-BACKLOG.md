@@ -397,9 +397,29 @@ build and tests green before committing.
 
 - [ ] **F1. Enable R8 for release.** `isMinifyEnabled = true` with a keep rule for the serialisation
   and reflection paths; measure the APK size before and after and record both in the commit.
-- [ ] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
+  *Deferred (5 Nov run):* not shipped unverified. The baseline unsigned release APK was built and
+  measured at 6,570,591 bytes, and the rules were written and parse cleanly, but `minifyReleaseWithR8`
+  does not finish inside one 300 s sandbox call (tried with 1024/1400/1600 MB heaps, serial GC, legacy
+  and full mode, and with and without `-dontoptimize`), so no minified APK could be produced and
+  nothing in the release path could be checked. Re-run this on a machine that can finish the R8 task.
+- [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
-  overload, and unused imports.
+  overload, and unused imports. *Done:* a full non-incremental compile
+  (`gradle :app:compileDebugKotlin -Pkotlin.incremental=false`, and the same for the unit-test source
+  set) now reports **0 warnings**, down from 10 in `main` (9 sites) and 10 in `test`. Migrated:
+  `Icons.AutoMirrored.Filled.ArrowBack`/`List` (same glyphs; the seven screen-capture assertions in
+  `ScreenshotTest` are unchanged); `createCaptureSession(SessionConfiguration(SESSION_REGULAR, …))` on
+  API 28+ with the old three-argument call kept for API 26-27, same outputs and the same main-thread
+  handler behind an `Executor`; `BluetoothAdapter.getDefaultAdapter()` dropped as the fallback behind
+  `BluetoothManager.adapter` (same source, null in the same cases); `HdrCapabilities.supportedHdrTypes`
+  read from `Display.mode.supportedHdrTypes` on API 34+ with the deprecated call below it. Suppressed
+  with a comment where a "fix" would change behaviour: `onRequestPermissionsResult` (moving to the
+  Activity Result API rewires the process-scoped permission manager and its request log),
+  `Settings.System.HAPTIC_FEEDBACK_ENABLED` (deprecated without a replacement) and
+  `KeyInfo.isInsideSecureHardware` (its successor `securityLevel` reports nothing below API 31 and is
+  not the same boolean, so adopting it would change the reported evidence). 17 unused imports removed;
+  `@OptIn(ExperimentalCoroutinesApi::class)` added to `ScanCoordinatorTest`. `assembleDebug` and all
+  205 unit tests green. No UI, copy or layout change.
 - [ ] **F3. Run `gradle lint` and triage.** Fix real findings, suppress the noise with reasons.
 - [ ] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable.

@@ -3,7 +3,6 @@ package com.verifydeviceinfo.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,7 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Info
@@ -29,7 +28,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -217,7 +215,7 @@ fun DashboardScreen(
         val tiles = listOf(
             Triple("Device overview", "Identity and headline facts", Icons.Filled.Info) to Screen.Overview,
             Triple("All specifications", "Searchable A-to-Z list", Icons.Filled.Search) to Screen.Specs,
-            Triple("Hardware explorer", "Components and capabilities", Icons.Filled.List) to Screen.Hardware,
+            Triple("Hardware explorer", "Components and capabilities", Icons.AutoMirrored.Filled.List) to Screen.Hardware,
             Triple("Authenticity", "Reference comparison and risk", Icons.Filled.Star) to Screen.Authenticity,
             Triple("Parts and repairs", "Five-state component analysis", Icons.Filled.Build) to Screen.Parts,
             Triple("Battery", "Health, temperature, charging", Icons.Filled.Warning) to Screen.Battery,

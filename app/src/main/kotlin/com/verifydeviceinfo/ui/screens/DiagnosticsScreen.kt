@@ -32,7 +32,6 @@ import com.verifydeviceinfo.ui.UiState
 import com.verifydeviceinfo.ui.components.AppScreen
 import com.verifydeviceinfo.ui.components.SectionCard
 import com.verifydeviceinfo.ui.components.StatusChip
-import com.verifydeviceinfo.ui.components.SpecRow
 
 @Composable
 fun DiagnosticsScreen(
