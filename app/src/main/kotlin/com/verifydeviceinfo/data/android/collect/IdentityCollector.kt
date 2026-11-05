@@ -24,9 +24,8 @@ class IdentityCollector(private val props: SystemPropertyReader) {
         val fields = mutableListOf<SpecField>()
         val softwareFields = mutableListOf<SpecField>()
 
-        val marketingName = props.get("ro.product.marketname")
-            ?: props.get("ro.product.odm.marketname")
-            ?: props.get("ro.vendor.product.marketname")
+        val marketing = marketingName(props)
+        val marketingName = marketing?.second
 
         val serial = readSerial()
 
@@ -42,7 +41,8 @@ class IdentityCollector(private val props: SystemPropertyReader) {
         )
         fields += FieldBuilder.value(
             "identity.marketingName", "Marketing name", marketingName, SpecGroup.IDENTITY,
-            "ro.product.marketname", Confidence.MEDIUM, Verification.DIRECTLY_VERIFIED,
+            marketing?.first ?: MARKETING_NAME_KEYS.first(), Confidence.MEDIUM,
+            Verification.DIRECTLY_VERIFIED,
             note = if (marketingName == null) "Not published by this build; the model code is shown instead." else null
         )
         fields += FieldBuilder.value(
@@ -177,4 +177,35 @@ class IdentityCollector(private val props: SystemPropertyReader) {
     } catch (other: Throwable) {
         null
     }
+
+    companion object {
+
+        /**
+         * Property keys that can carry the marketing name, in the order Android resolves them.
+         *
+         * `init` merges `ro.product.<partition>.*` from system, system_ext, product, vendor and odm
+         * and the first non-empty value wins, but a build can populate only one of them — and older
+         * OEM trees use the `ro.<partition>.product.*` spelling instead. Reading only
+         * `ro.product.marketname` therefore reports "not published" on devices that do publish it.
+         */
+        internal val MARKETING_NAME_KEYS = listOf(
+            "ro.product.marketname",
+            "ro.product.system.marketname",
+            "ro.product.system_ext.marketname",
+            "ro.product.product.marketname",
+            "ro.product.vendor.marketname",
+            "ro.product.odm.marketname",
+            // Pre-partition OEM spellings, tried last so a standard key always wins.
+            "ro.vendor.product.marketname",
+            "ro.odm.product.marketname"
+        )
+
+        /**
+         * The first non-blank marketing name and the key that answered it, or null when the build
+         * publishes none. The key travels with the value so the field can name its real source.
+         */
+        internal fun marketingName(props: SystemPropertyReader): Pair<String, String>? =
+            MARKETING_NAME_KEYS.firstNotNullOfOrNull { key -> props.get(key)?.let { key to it } }
+    }
+
 }

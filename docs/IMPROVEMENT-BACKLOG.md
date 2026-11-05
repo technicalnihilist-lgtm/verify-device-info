@@ -402,6 +402,17 @@ build and tests green before committing.
   does not finish inside one 300 s sandbox call (tried with 1024/1400/1600 MB heaps, serial GC, legacy
   and full mode, and with and without `-dontoptimize`), so no minified APK could be produced and
   nothing in the release path could be checked. Re-run this on a machine that can finish the R8 task.
+  *Re-tried (5 Nov, second run):* the earlier slowness was partly self-inflicted — this sandbox exports
+  `JAVA_TOOL_OPTIONS=-XX:CompressedClassSpaceSize=64m`, which starves D8 and the Kotlin compiler. With
+  that unset, a cold `assembleDebug` drops from "never finishes" to ~6 min and `mergeExtDexDebug` from
+  >280 s to 1m46. The baseline unsigned release APK was rebuilt and reproduces at exactly 6,570,591
+  bytes. `minifyReleaseWithR8` alone still exceeds a 240 s call, both with
+  `proguard-android-optimize.txt` and with `proguard-android.txt` (no optimisation passes) at a 1.5 GB
+  heap, and the task is not resumable across calls. Note for the next attempt: this app has **no**
+  `@Serializable` classes — `ReportJson` only encodes `JsonElement` through a statically referenced
+  serializer — so the keep-rule risk that held this item back is smaller than assumed; the only
+  reflective lookups are framework classes (`android.os.SystemProperties`,
+  `com.android.internal.os.PowerProfile`) that R8 never renames.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -421,16 +432,37 @@ build and tests green before committing.
   `@OptIn(ExperimentalCoroutinesApi::class)` added to `ScanCoordinatorTest`. `assembleDebug` and all
   205 unit tests green. No UI, copy or layout change.
 - [ ] **F3. Run `gradle lint` and triage.** Fix real findings, suppress the noise with reasons.
-- [ ] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
-  enough to be sustainable.
-- [ ] **F5. Trim unused dependencies.** Confirm nothing pulls in `material-icons-extended` or other
-  large artefacts by accident; report the dependency tree size.
+  *Deferred (5 Nov, second run):* lint cannot complete here. `:app:lintDebug` runs the main, androidTest
+  and unit-test analyses in parallel on 2 cores and is killed at 240 s; even `:app:lintAnalyzeDebug`
+  alone (after the dependency downloads were cached) exceeds a 236 s call, and the analysis is not
+  resumable. Nothing was triaged, so nothing was suppressed: a baseline written from a half-finished
+  analysis would hide real findings. Needs a machine with more cores, or `lint` run per-module in CI.
+- [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
+  enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
+  `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
+  avoided — it would turn any future third-party deprecation into a build break rather than protecting
+  `core`/`domain`. F2 already holds the module at 0 warnings, so there is nothing this would catch
+  today. Re-scope as a CI warning-count check if it is wanted.
+- [x] **F5. Trim unused dependencies.** Confirm nothing pulls in `material-icons-extended` or other
+  large artefacts by accident; report the dependency tree size. *Audited, nothing to trim:*
+  `releaseRuntimeClasspath` resolves to **149 modules**. The icon dependency is `material-icons-core`
+  only; `material-icons-extended` appears nowhere in the tree, and every other top-level entry maps to a
+  declared dependency (compose-bom, core-ktx, activity-compose, lifecycle-runtime/viewmodel-compose, the
+  compose artefacts, kotlinx-coroutines-android, kotlinx-serialization-json). Robolectric, Roborazzi and
+  `ui-test-junit4` stay confined to `testImplementation`, and `ui-tooling`/`ui-test-manifest` to
+  `debugImplementation`, so none of them reach the release APK.
 
 ## G. Documentation of the work
 
 - [ ] **G1. Add `docs/PERFORMANCE.md`** recording each measured improvement (before/after numbers) as
   items land. Numbers, not adjectives.
-- [ ] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
+  *Deferred (5 Nov, second run):* every before/after number the A–E items produced is already written
+  into this file next to the item, so a second copy today would only duplicate them and drift. Write it
+  when an item lands whose measurement is not already recorded here.
+- [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
+  *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
+  makes no new claim, and `LIMITATIONS.md` already covers reference-data coverage and per-API
+  availability.
 
 ---
 
@@ -443,8 +475,21 @@ would be worse than one honest one.
 
 ## H. Data accuracy and platform coverage
 
-- [ ] **H1. Vendor market-name fallbacks.** Read `ro.product.marketname` across the `odm`/`vendor`
-  namespaces and pick the first non-empty; some OEMs only populate one.
+- [x] **H1. Vendor market-name fallbacks.** Read `ro.product.marketname` across the `odm`/`vendor`
+  namespaces and pick the first non-empty; some OEMs only populate one. *Done:* the old lookup read
+  `ro.product.marketname`, `ro.product.odm.marketname` and `ro.vendor.product.marketname`, so it missed
+  the **standard partition-qualified spelling** `ro.product.vendor.marketname` (and `system`,
+  `system_ext`, `product`) entirely — a device that publishes the marketing name only from its vendor
+  partition reported "Unavailable"/`UNVERIFIED`. `IdentityCollector.MARKETING_NAME_KEYS` now lists all
+  eight keys in the order `init` resolves them (system, system_ext, product, vendor, odm, then the
+  pre-partition `ro.<partition>.product.*` spellings last, so a standard key always wins), and
+  `marketingName(props)` returns the value **with the key that answered**, which the field now reports
+  as its `source` instead of always claiming `ro.product.marketname`. Blank values are still skipped by
+  `SystemPropertyReader.get`, so "first non-empty" holds. Seven new tests in
+  `IdentityMarketingNameTest` pin the precedence, the blank case, the null case and the key table.
+  No new screen, control, style or copy: the only rendering difference is that a device which publishes
+  the name from a partition other than `system` now shows the name (and the true property) where it
+  previously showed "Unavailable". `assembleDebug` and all 212 unit tests green (205 before, 7 new).
 - [ ] **H2. SoC manufacturer cross-check.** Compare `Build.SOC_MANUFACTURER` with the vendor implied by
   `ro.soc.model` and report a mismatch as `UNVERIFIED`, not as a warning.
 - [ ] **H3. Battery health code 0 means unknown, not good.** `BATTERY_HEALTH_UNKNOWN` is currently
