@@ -427,6 +427,9 @@ build and tests green before committing.
   `assembleDebug` this run took five calls (about 25 minutes, `mergeExtDexDebug` alone 4m08s at a
   1750 MB heap), and `minifyReleaseWithR8` still does not fit in a single 300 s call and restarts
   from zero when the call is killed, so no minified APK can be produced or measured here.
+  *Passed over (6 Nov, fourth pass):* unchanged — still 2 cores / 2,098 MB, and the cold
+  `assembleDebug` for this run again needed eight calls (about 40 minutes), so the non-resumable
+  `minifyReleaseWithR8` still cannot be produced, let alone measured.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -456,6 +459,8 @@ build and tests green before committing.
   *Passed over (6 Nov, second pass):* same constraint, unchanged hardware.
   *Passed over (6 Nov, third pass):* same constraint — a single `lintAnalyzeDebug` does not fit in a
   300 s call on 2 cores, and a half-finished analysis cannot be triaged honestly.
+  *Passed over (6 Nov, fourth pass):* same constraint, unchanged hardware; nothing was suppressed,
+  because a baseline from a killed analysis would hide real findings.
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -484,6 +489,8 @@ build and tests green before committing.
   the item that produced it, in this file. Write it once the numbers are stable, at the end of the window.
   *Passed over (6 Nov, third pass):* unchanged — this run produced a tool (I4), not a measurement, so
   there is still no number without a home in this file.
+  *Passed over (6 Nov, fourth pass):* this run's one measurement (core 0's ceiling vs the part's) is
+  recorded in H12's own entry, so the duplication argument still holds.
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
   makes no new claim, and `LIMITATIONS.md` already covers reference-data coverage and per-API
@@ -521,6 +528,8 @@ would be worse than one honest one.
   finding — a new card with new title, explanation and evidence lines on the authenticity screen —
   so it needs a visible change. It also needs a vendor-implied-by-SoC-name table, which is a data
   set this app does not carry. Belongs to a design pass, not this one.
+  *Passed over (6 Nov, fourth pass):* unchanged — a new authenticity finding is a new card, which the
+  UI freeze forbids, and the vendor table is still data the app does not carry.
 - [x] **H3. Battery health code 0 means unknown, not good.** `BATTERY_HEALTH_UNKNOWN` is currently
   scored like a healthy pack; treat it as missing evidence. *Done:* in `DefaultPartsProvider` the
   battery branch tested `healthCode != 2 && healthCode > 0`, which sent code 1 (`BATTERY_HEALTH_UNKNOWN`)
@@ -559,6 +568,8 @@ would be worse than one honest one.
   document which one is reported and why, and expose the other value.
   *Skipped (6 Nov, second pass):* "expose the other value" means a new row or a second value on the
   camera screen — a visible change. The precedence itself is worth documenting in the code later.
+  *Passed over (6 Nov, fourth pass):* unchanged — "expose the other value" is a second value on the
+  camera screen.
 - [x] **H6. Replace deprecated `getRealMetrics`.** Use `WindowMetrics` on API 30+ with the old path as
   fallback; behaviour must stay identical on every API level. *Done:* `HardwareCollector.readDisplay`
   no longer calls `Display.getRealMetrics` above API 29. A new private
@@ -584,6 +595,7 @@ would be worse than one honest one.
   *Skipped (6 Nov, third pass):* the only way to report the underlying transport is a new row or a
   changed value in the connectivity list — a visible change. It also needs `NetworkCapabilities`
   observed under a live VPN, which nothing here can exercise.
+  *Passed over (6 Nov, fourth pass):* unchanged — still a new row, and still no live VPN to observe.
 - [x] **H8. Count packages once.** `getInstalledPackages` is called and walked twice in places; derive
   system and user counts from a single pass. *Already done:* `getInstalledPackages(0)` is called once
   in `main`, in `SoftwareCollector.collect`, and the single pass over that list increments both the
@@ -594,6 +606,8 @@ would be worse than one honest one.
   `ro.boot.verifiedbootstate`, but the item also asks to "say which property answered", which rewrites
   the `security.verifiedBoot` source line and the integrity check's explanation and evidence on the
   security screen — a copy change. The copy-free half could be split out.
+  *Passed over (6 Nov, fourth pass):* unchanged — the fallback alone buys nothing on devices that
+  publish `ro.boot.verifiedbootstate`, and "say which property answered" is copy.
 - [x] **H10. Locale audit.** Every `String.format` must pass `Locale.US`; a device set to Arabic or
   Hindi digits currently renders numbers inconsistently in the report. *Already done:* every
   `String.format` in `main` passes `Locale.US` explicitly — all 35 sites, no exceptions.
@@ -603,10 +617,36 @@ would be worse than one honest one.
   `hi-IN-u-nu-deva` and `th-TH-u-nu-thai` while `%d` and `%.1f` switch to native digits.
 - [ ] **H11. Per-volume storage.** Use `StorageManager` to report internal versus adoptable volume free
   space instead of only the data partition.
-- [ ] **H12. Per-core CPU frequencies.** Read max frequency for every core, not just `cpu0`, and report
-  the cluster layout when it is readable.
+  *Passed over (6 Nov, fourth pass):* reporting a second volume means new rows ("Internal"/"Adoptable")
+  in the storage group — a visible change. The copy-free half would be reporting only the primary
+  volume, which is exactly what it already does.
+- [x] **H12. Per-core CPU frequencies.** Read max frequency for every core, not just `cpu0`, and report
+  the cluster layout when it is readable. *Done (frequency half; cluster layout dropped):* `cpu0` is a
+  LITTLE core on every ARM big.LITTLE/DynamIQ part, so the old `cpu0/cpufreq/cpuinfo_max_freq` lookup
+  answered 1.80 GHz for a chip whose prime core runs 2.84 GHz — the field said "Maximum CPU
+  frequency" and reported a cluster ceiling. New `data/android/collect/CpuFrequency.kt` scans every
+  `cpuN` directory under `/sys/devices/system/cpu`, takes the largest positive `cpuinfo_max_freq` and
+  skips a core whose node is absent (offline), blank, `0` or non-numeric instead of failing the whole
+  read, so one odd core cannot take the value away from the others. On a homogeneous part it returns
+  the same number as before, which is why the change is invisible there. `HardwareCollector` calls it
+  instead of its private `readCpuMaxFreq()`, and the field's source annotation became
+  `/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq` so the line no longer claims a `cpu0`-only
+  read — the one rendered text delta in this commit, a source path, not a label, note or value format
+  (H1 set the same precedent when it reported the property that actually answered). Nine tests in
+  `CpuFrequencyTest` over fixture directories shaped like the real sysfs: homogeneous part, the
+  big.LITTLE regression (cpu0 1.8 GHz, cpu7 2.84 GHz → 2,841,600 kHz), directory-order independence,
+  an offline core without a `cpufreq` node, blank/`0`/non-numeric values, no usable value, a missing
+  root, non-core entries (`cpufreq`, `cpuidle`, `cpuonline`, `online`) and a directory named like the
+  node. Before/after is the fixture case, not a handset: no device is available here, and this
+  sandbox's own `/sys/devices/system/cpu` publishes no `cpufreq` nodes at all. The cluster-layout half
+  of the item is dropped, not deferred quietly: per-cluster rows are new rows on the processor
+  screen. `assembleDebug` green, APK 9,811,608 bytes (unchanged), all 233 unit tests pass (224 before,
+  9 new), `tools/check-no-ui-change.sh` clean.
 - [ ] **H13. Elapsed-realtime distinction.** Report both `elapsedRealtime` (includes deep sleep) and
   `uptimeMillis` (awake only) so uptime is unambiguous.
+  *Passed over (6 Nov, fourth pass):* a second uptime value is a second row (or a changed label) on the
+  overview and in the report — a visible change. The copy-free part, renaming the misleading internal
+  `uptimeMillis` field, is a rename with no behaviour to test.
 - [ ] **H14. Reference codenames.** Add codename patterns to the reference entries so matching works
   for builds whose `Build.MODEL` is a carrier variant.
 

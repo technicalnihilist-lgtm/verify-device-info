@@ -117,7 +117,7 @@ class HardwareCollector(
         // ---- CPU ----
         val cores = Runtime.getRuntime().availableProcessors()
         val abis = Build.SUPPORTED_ABIS?.toList().orEmpty()
-        val maxFreq = readCpuMaxFreq()
+        val maxFreq = CpuFrequency.maxFreqKhz()
         fields += FieldBuilder.value(
             "cpu.cores", "CPU cores", cores.toString(), SpecGroup.PROCESSOR, "Runtime.availableProcessors()"
         )
@@ -137,7 +137,7 @@ class HardwareCollector(
         fields += FieldBuilder.value(
             "cpu.maxFreq", "Maximum CPU frequency",
             maxFreq?.let { String.format(java.util.Locale.US, "%.2f GHz", it / 1_000_000.0) },
-            SpecGroup.PROCESSOR, "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
+            SpecGroup.PROCESSOR, "/sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq",
             Confidence.MEDIUM,
             note = if (maxFreq == null) "This kernel does not expose CPU frequency scaling to apps." else null
         )
@@ -387,12 +387,6 @@ class HardwareCollector(
             }
         }
         if (total > 0) total to available else null
-    } catch (e: Exception) {
-        null
-    }
-
-    private fun readCpuMaxFreq(): Long? = try {
-        File("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").readText().trim().toLongOrNull()
     } catch (e: Exception) {
         null
     }
