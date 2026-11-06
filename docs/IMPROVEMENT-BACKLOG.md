@@ -438,6 +438,9 @@ build and tests green before committing.
   confirmed this run: the repo's `-XX:MaxMetaspaceSize=320m` is too small for the Compose compile —
   the daemon expires out of metaspace and the build fails — so the release path needs a raised
   metaspace ceiling *and* a 1750 MB heap, which is 2 GB of a 2 GB machine before R8 starts.
+  *Passed over (6 Nov, sixth pass):* unchanged — `nproc` = 2, 2,098 MB. This run's cold
+  `assembleDebug` needed six calls and a further one for `testDebugUnitTest`, so the non-resumable
+  `minifyReleaseWithR8` still has nowhere to run. Nothing in the release path can be checked here.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -472,6 +475,8 @@ build and tests green before committing.
   *Passed over (6 Nov, fifth pass):* same constraint, unchanged hardware. This run's cold
   `assembleDebug` needed six calls, one of them a single 4m28s `mergeExtDexDebug`, so a non-resumable
   `lintAnalyzeDebug` has no room to finish either.
+  *Passed over (6 Nov, sixth pass):* same constraint — this run's cold `assembleDebug` alone took six
+  300 s calls on 2 cores, so a single non-resumable `lintAnalyzeDebug` cannot be finished or triaged.
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -508,6 +513,8 @@ build and tests green before committing.
   per-item before/after figures still live next to their items in this file, and copying them across
   would be the duplication this entry has been avoiding. Close it at the end of the window, when the
   numbers are stable.
+  *Passed over (6 Nov, sixth pass):* this run produced no measurement — a CI workflow and two
+  already-covered backlog items — so there is still no number without a home in this file.
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
   makes no new claim, and `LIMITATIONS.md` already covers reference-data coverage and per-API
@@ -726,12 +733,44 @@ would be worse than one honest one.
   column is host-specific while the size and count columns are not. `assembleDebug` green, APK
   9,811,608 bytes (unchanged — tooling and docs only), all 233 unit tests pass,
   `tools/check-no-ui-change.sh` clean.
-- [ ] **I6. Redaction test.** Assert that a report with a serial number, a Bluetooth name and a
-  certificate digest contains none of them when `redacted = true`.
-- [ ] **I7. GitHub Actions CI.** Build and test on every push so a regression is caught by the
-  repository itself, not only by a nightly run.
+- [x] **I6. Redaction test.** Assert that a report with a serial number, a Bluetooth name and a
+  certificate digest contains none of them when `redacted = true`. *Already done:* `ReportJsonTest`
+  carries `no raw identifier survives in a redacted export` (encodes the fixture with
+  `redacted = true` and asserts the serial, the Bluetooth name and the certificate digest appear
+  nowhere in the text), `an unredacted export keeps the identifiers` (the same three strings are
+  present when redaction is off, so the first test cannot pass by exporting nothing) and
+  `a null serial stays null when redacted`, plus `redaction replaces exactly the serial and the
+  flagged specification values`. Nothing was missing, so nothing was added.
+- [x] **I7. GitHub Actions CI.** Build and test on every push so a regression is caught by the
+  repository itself, not only by a nightly run. *Done:* new `.github/workflows/ci.yml` (one job,
+  `ubuntu-latest`, 60-minute timeout) runs on every push to `main`, every pull request and
+  `workflow_dispatch`, with `concurrency` cancelling a superseded run and `permissions: contents:
+  read` — it needs nothing to write. It installs the toolchain with the repository's own
+  `tools/bootstrap-build.sh` (JDK 17, Gradle 8.9, Android SDK 35) into `$RUNNER_TEMP/build` and
+  republishes its exports through `$GITHUB_ENV`/`$GITHUB_PATH`, so CI builds through exactly the path
+  `docs/BUILDING.md` documents instead of a second, drifting set of commands. It unsets
+  `JAVA_TOOL_OPTIONS` before building, because the small class-space ceiling some images export is
+  what starves D8 and kotlinc (the same trap recorded under F1). The two gates are the two gates used
+  locally, `gradle assembleDebug` and `gradle testDebugUnitTest`; the toolchain, SDK and Gradle caches
+  are cached under a key built from `tools/bootstrap-build.sh` and the four build files, so a
+  toolchain change invalidates them rather than silently reusing a stale one. The JUnit report and
+  test results are uploaded `if: always()` and the debug APK as an artefact (7-day retention).
+  `docs/BUILDING.md`'s "CI sketch" section, which described a workflow that did not exist, is
+  replaced by a "Continuous integration" section describing this one. Verified here: the YAML parses
+  and its `on`/step list are as intended, and the toolchain step was executed for real in this sandbox
+  against a stub `$GITHUB_ENV`/`$GITHUB_PATH` — it exports `JAVA_HOME`, `ANDROID_HOME`,
+  `ANDROID_SDK_ROOT`, `GRADLE_USER_HOME` and three PATH entries, and `gradle` then resolves from that
+  PATH. **Not verified: the workflow has never run on a GitHub runner** — this sandbox cannot reach
+  Actions, so the checkout/cache/upload steps and the runner's own limits are unexercised. Build and
+  tests green locally: `assembleDebug` succeeded, `testDebugUnitTest` passed all 233 tests, APK
+  unchanged at 9,811,608 bytes, `tools/check-no-ui-change.sh` clean (no `ui/` or `res/` file touched).
 - [ ] **I8. Lint triage.** Run `gradle lint`, fix real findings, suppress the rest with a written reason.
-- [ ] **I9. Screenshot non-blank assertion.** Fail the render test if an image comes back uniform.
+- [x] **I9. Screenshot non-blank assertion.** Fail the render test if an image comes back uniform.
+  *Already done:* `ScreenshotTest` measures every capture (distinct colours and ink fraction) and
+  fails with the measured numbers when a screen comes back blank, and `aBlankFrameIsRejected` renders
+  an empty frame and asserts the check rejects it — so the seven screen assertions cannot pass for a
+  reason unrelated to the screen having been drawn. Recorded in the E-section entry above; the
+  checkbox was simply never ticked.
 - [ ] **I10. Dependency audit.** Record the resolved dependency tree and flag anything unexpectedly
   large.
 

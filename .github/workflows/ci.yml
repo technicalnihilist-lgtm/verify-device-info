@@ -1,0 +1,86 @@
+name: CI
+
+# Build and unit-test every push and pull request, so a regression is caught by the repository
+# itself rather than by a nightly run on someone's machine.
+#
+# The toolchain is the same one a local build uses: `tools/bootstrap-build.sh` installs JDK 17,
+# Gradle 8.9 and Android SDK 35 into a work directory and exports JAVA_HOME / ANDROID_HOME /
+# GRADLE_USER_HOME, so CI cannot drift from the documented build path.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: assembleDebug + testDebugUnitTest
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # The toolchain and the dependency caches are the slow part of a cold build (~850 MB of
+      # Gradle dependencies). Keyed on the bootstrap script and the build files, so a change to
+      # either invalidates them instead of silently reusing a stale toolchain.
+      - name: Cache toolchain and Gradle caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/build/toolchain
+            ${{ runner.temp }}/build/android-sdk
+            ${{ runner.temp }}/build/.gradle/caches
+          key: toolchain-${{ runner.os }}-${{ hashFiles('tools/bootstrap-build.sh', 'build.gradle.kts', 'app/build.gradle.kts', 'gradle.properties') }}
+
+      - name: Install JDK 17, Gradle 8.9 and Android SDK 35
+        run: |
+          ulimit -v unlimited 2>/dev/null || true
+          # Some images export JAVA_TOOL_OPTIONS with a small class-space ceiling, which starves
+          # D8 and kotlinc; the build needs it out of the way.
+          unset JAVA_TOOL_OPTIONS
+          export WORK="$RUNNER_TEMP/build"
+          source tools/bootstrap-build.sh
+          {
+            echo "JAVA_HOME=$JAVA_HOME"
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+            echo "GRADLE_USER_HOME=$GRADLE_USER_HOME"
+          } >> "$GITHUB_ENV"
+          {
+            echo "$JAVA_HOME/bin"
+            echo "$WORK/toolchain/gradle/bin"
+            echo "$ANDROID_HOME/platform-tools"
+          } >> "$GITHUB_PATH"
+
+      - name: assembleDebug
+        run: gradle assembleDebug
+
+      - name: testDebugUnitTest
+        run: gradle testDebugUnitTest
+
+      - name: Upload unit-test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: |
+            app/build/reports/tests/testDebugUnitTest
+            app/build/test-results/testDebugUnitTest
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

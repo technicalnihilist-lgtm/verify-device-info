@@ -141,10 +141,26 @@ only. It needs no SDK, no Gradle and no network.
 | Behind a proxy | Add `systemProp.http(s).proxyHost/Port/User/Password` to `~/.gradle/gradle.properties`, not to the project file. |
 | Camera test shows a black preview | Another app holds the camera, or the device is a multi-camera device where the first enumerated id is a logical camera — try the other lens. |
 
-## CI sketch
+## Continuous integration
+
+`.github/workflows/ci.yml` builds and unit-tests every push to `main` and every pull request. It runs
+the same path a local build does — `source tools/bootstrap-build.sh` for JDK 17, Gradle 8.9 and Android
+SDK 35 — so CI cannot drift from the commands above, and it caches the toolchain and the Gradle caches
+between runs (the cache key is the bootstrap script plus the build files). The two steps that gate a
+merge are exactly the two gates this project uses locally:
+
+```bash
+gradle assembleDebug
+gradle testDebugUnitTest
+```
+
+The job fails on either, uploads the JUnit report and test results on failure, and keeps the debug APK
+as an artefact for seven days. It does not run `lint`: the analysis is heavy enough to need more than
+one runner core, and it is tracked separately in `docs/IMPROVEMENT-BACKLOG.md`.
+
+## Release signing
 
 ```yaml
-- run: ./gradlew testDebugUnitTest lint
 - run: ./gradlew assembleRelease
   env:
     KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
