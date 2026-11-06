@@ -421,6 +421,8 @@ build and tests green before committing.
   open until it runs on a host with more memory than a single Gradle call can use.
   *Passed over (6 Nov run):* unchanged — this sandbox is still 2 cores / 2 GB, where a cold
   `assembleDebug` alone needs four 300 s calls, so `minifyReleaseWithR8` cannot be run or checked here.
+  *Passed over (6 Nov, second pass):* unchanged — still 2 cores / 2 GB, and a cold `assembleDebug`
+  still needs four calls, so there is no room for a non-resumable `minifyReleaseWithR8`.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -447,6 +449,7 @@ build and tests green before committing.
   analysis would hide real findings. Needs a machine with more cores, or `lint` run per-module in CI.
   *Passed over (6 Nov run):* same constraint — a single `lintAnalyzeDebug` does not fit in a 300 s call
   on 2 cores, and a half-finished analysis cannot be triaged honestly.
+  *Passed over (6 Nov, second pass):* same constraint, unchanged hardware.
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -471,6 +474,8 @@ build and tests green before committing.
   when an item lands whose measurement is not already recorded here.
   *Passed over (6 Nov run):* H4's numbers are recorded in its own entry, so the duplication argument
   still holds; this waits for an item whose measurement has no home in this file.
+  *Passed over (6 Nov, second pass):* still duplication — every number it would hold is already next to
+  the item that produced it, in this file. Write it once the numbers are stable, at the end of the window.
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
   makes no new claim, and `LIMITATIONS.md` already covers reference-data coverage and per-API
@@ -544,8 +549,28 @@ would be worse than one honest one.
   before/after is the fixture case (4 handles → 2 sensors), not a handset reading.
 - [ ] **H5. Megapixel source precedence.** When the stream configuration and the pixel array disagree,
   document which one is reported and why, and expose the other value.
-- [ ] **H6. Replace deprecated `getRealMetrics`.** Use `WindowMetrics` on API 30+ with the old path as
-  fallback; behaviour must stay identical on every API level.
+  *Skipped (6 Nov, second pass):* "expose the other value" means a new row or a second value on the
+  camera screen — a visible change. The precedence itself is worth documenting in the code later.
+- [x] **H6. Replace deprecated `getRealMetrics`.** Use `WindowMetrics` on API 30+ with the old path as
+  fallback; behaviour must stay identical on every API level. *Done:* `HardwareCollector.readDisplay`
+  no longer calls `Display.getRealMetrics` above API 29. A new private
+  `readRealMetrics(windowManager, display, out)` takes the pixel rectangle from
+  `WindowManager.getMaximumWindowMetrics().bounds` — the documented replacement, which reports the same
+  full panel, system-bar area included, in physical pixels — and keeps the deprecated call for API 26-29
+  and as the fallback when the window metrics are absent, zero-sized or throw. Density, xdpi and ydpi
+  still come from `context.resources.displayMetrics`: the same `DisplayMetrics` fields of the same
+  default display, from a source deprecated on no level. They have to, because `WindowMetrics.getDensity()`
+  is API 34+ and xdpi/ydpi are not on `WindowMetrics` at all — a first version that read the density from
+  `WindowMetrics` compiled cleanly and threw `NoSuchMethodError` on API 30-33, which the Robolectric run
+  caught and the compiler could not. The window-metrics answer is taken only when those resource fields
+  are readable, so no device loses a value it reported before. Two tests in
+  `HardwareCollectorWindowMetricsTest`: API 33 reports the maximum-window-metrics rectangle and the
+  resource density, and API 29 still reports exactly what `getRealMetrics` gives — 320x470 px at 160 dpi
+  under Robolectric, byte-identical to the value before the change. Not verified on hardware, and the
+  API 30+ branch itself is **not** exercised by the test run: Robolectric's `WindowManager` reports a
+  0x0 maximum rectangle, so every test here takes the fallback path and the new branch is verified by
+  inspection only. `assembleDebug` green with 0 compiler warnings; all 224 unit tests pass (222 before).
+  No screen, control, style, layout or copy change.
 - [ ] **H7. VPN-aware transport reporting.** With a VPN active, report the underlying transport as well
   as the VPN instead of only "VPN".
 - [ ] **H8. Count packages once.** `getInstalledPackages` is called and walked twice in places; derive

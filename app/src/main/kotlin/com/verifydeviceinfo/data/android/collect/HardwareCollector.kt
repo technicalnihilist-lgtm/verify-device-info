@@ -247,13 +247,7 @@ class HardwareCollector(
         }
 
         val metrics = android.util.DisplayMetrics()
-        val readRealMetrics = display != null && try {
-            @Suppress("DEPRECATION")
-            display.getRealMetrics(metrics)
-            true
-        } catch (e: Exception) {
-            false
-        }
+        val readRealMetrics = readRealMetrics(windowManager, display, metrics)
 
         if (!readRealMetrics) {
             // The resource metrics describe the display the app is rendering on: window-sized on a
@@ -323,6 +317,64 @@ class HardwareCollector(
             hdrTypes = hdr,
             wideColorGamut = wideColorGamut
         )
+    }
+
+    /**
+     * Fills [out] with the physical display metrics, preferring the non-deprecated
+     * [WindowManager.getMaximumWindowMetrics] on API 30+ and keeping the deprecated
+     * [Display.getRealMetrics] for older levels and as the fallback when the window metrics are
+     * unusable (no window manager, a zero-sized rectangle, or a framework that throws).
+     *
+     * The two sources describe the same rectangle. `getMaximumWindowMetrics()` is the documented
+     * replacement for `getRealMetrics()`: it reports the largest area the app can occupy on the
+     * display, i.e. the whole panel including the parts covered by the system bars, in physical
+     * pixels. `WindowMetrics` carries only that rectangle — its `getDensity()` exists from API 34
+     * and the physical xdpi/ydpi are not on it at all — so the remaining fields are taken from the
+     * resource metrics, which are the same `DisplayMetrics` fields of the same default display and
+     * are not deprecated on any level. The window metrics answer is used only when those resource
+     * fields are readable, so a device that could previously report a density still does.
+     */
+    private fun readRealMetrics(
+        windowManager: WindowManager?,
+        display: Display?,
+        out: android.util.DisplayMetrics
+    ): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val fromWindowMetrics = try {
+                val bounds = windowManager?.maximumWindowMetrics?.bounds
+                val resources = try {
+                    context.resources.displayMetrics
+                } catch (e: Exception) {
+                    null
+                }
+                if (bounds != null && bounds.width() > 0 && bounds.height() > 0 &&
+                    resources != null && resources.densityDpi > 0
+                ) {
+                    out.setTo(resources)
+                    out.widthPixels = bounds.width()
+                    out.heightPixels = bounds.height()
+                    true
+                } else {
+                    false
+                }
+            } catch (e: Exception) {
+                false
+            }
+            if (fromWindowMetrics) return true
+        }
+
+        return try {
+            @Suppress("DEPRECATION")
+            if (display == null) {
+                false
+            } else {
+                @Suppress("DEPRECATION")
+                display.getRealMetrics(out)
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun readProcMemInfo(): Pair<Long, Long>? = try {
