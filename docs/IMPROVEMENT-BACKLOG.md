@@ -430,6 +430,14 @@ build and tests green before committing.
   *Passed over (6 Nov, fourth pass):* unchanged — still 2 cores / 2,098 MB, and the cold
   `assembleDebug` for this run again needed eight calls (about 40 minutes), so the non-resumable
   `minifyReleaseWithR8` still cannot be produced, let alone measured.
+  *Passed over (6 Nov, fifth pass):* unchanged hardware (2 cores / 2,098 MB). One new fact for the
+  next attempt: killing the Gradle client at the 300 s call limit does **not** leave the daemon
+  working on the task — every later call in this run reported "Starting a Gradle Daemon" again, so a
+  killed `minifyReleaseWithR8` still loses all of its work. The one exception seen was a task that
+  finished ~9 s after the client was killed; that is a race, not a way to run a 15-minute task. Also
+  confirmed this run: the repo's `-XX:MaxMetaspaceSize=320m` is too small for the Compose compile —
+  the daemon expires out of metaspace and the build fails — so the release path needs a raised
+  metaspace ceiling *and* a 1750 MB heap, which is 2 GB of a 2 GB machine before R8 starts.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -461,6 +469,9 @@ build and tests green before committing.
   300 s call on 2 cores, and a half-finished analysis cannot be triaged honestly.
   *Passed over (6 Nov, fourth pass):* same constraint, unchanged hardware; nothing was suppressed,
   because a baseline from a killed analysis would hide real findings.
+  *Passed over (6 Nov, fifth pass):* same constraint, unchanged hardware. This run's cold
+  `assembleDebug` needed six calls, one of them a single 4m28s `mergeExtDexDebug`, so a non-resumable
+  `lintAnalyzeDebug` has no room to finish either.
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -491,6 +502,12 @@ build and tests green before committing.
   there is still no number without a home in this file.
   *Passed over (6 Nov, fourth pass):* this run's one measurement (core 0's ceiling vs the part's) is
   recorded in H12's own entry, so the duplication argument still holds.
+  *Partly delivered (6 Nov, fifth pass):* I5 landed and with it `docs/PERFORMANCE.md`, holding the
+  reproducible artefact baseline (9,811,608 bytes, 102,504 methods, 14,071 classes), how to take a
+  new row, and the two hardware-independent per-item numbers. The item stays open only for the rest:
+  per-item before/after figures still live next to their items in this file, and copying them across
+  would be the duplication this entry has been avoiding. Close it at the end of the window, when the
+  numbers are stable.
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
   makes no new claim, and `LIMITATIONS.md` already covers reference-data coverage and per-API
@@ -649,6 +666,14 @@ would be worse than one honest one.
   `uptimeMillis` field, is a rename with no behaviour to test.
 - [ ] **H14. Reference codenames.** Add codename patterns to the reference entries so matching works
   for builds whose `Build.MODEL` is a carrier variant.
+  *Skipped (6 Nov, fifth pass):* the mechanism is already there — `ReferenceIndex.match` takes the
+  device string and matches a pattern that equals it (`normalisedDevice == candidate.key`) as well as
+  one contained in the model — so what is missing is data, not code: 16 entries would each need the
+  codenames of every carrier variant. This set is curated from manufacturer specification pages and
+  every entry records its own `sourceUrl` and `sourceDate`; codenames are not on those pages, so
+  adding them from memory would put unsourced identifiers into a set whose whole point is that each
+  entry can be checked. Re-scope as "add codenames for the entries whose codename is documented on
+  the recorded source", or add a source for codenames first.
 
 ## I. Tooling and tests that protect the work
 
@@ -685,8 +710,22 @@ would be worse than one honest one.
   documenting the three invocations. Tooling and docs only: no production file, no `ui/` or `res/`
   file touched, so `assembleDebug` output is unchanged (`app-debug.apk` 9,811,608 bytes) and all 224
   unit tests pass.
-- [ ] **I5. `tools/measure.sh`.** Records APK size, method count and a timed debug build into
-  `docs/PERFORMANCE.md`, so every claim of "faster" has a number behind it.
+- [x] **I5. `tools/measure.sh`.** Records APK size, method count and a timed debug build into
+  `docs/PERFORMANCE.md`, so every claim of "faster" has a number behind it. *Done:* new
+  `tools/measure.sh` (mode 100755, `unzip` and `python3` only — no SDK tool, no Gradle needed unless
+  asked). It reads the APK's size, then sums `method_ids_size` and `class_defs_size` from the DEX
+  headers of every `classesN.dex` (min SDK 26 packages native multidex, so this build ships 12), and
+  appends one fixed-column row to `docs/PERFORMANCE.md`: date, APK name, bytes, methods, classes, dex
+  files, dex bytes, build seconds. `--build` times `gradle assembleDebug` first and fills the last
+  column; `--apk <path>` measures the release artefact instead; `--print` prints the row without
+  writing; a missing APK exits 2 with the command to build one, so a run that measured nothing cannot
+  record a zero. First measured row, debug variant on this checkout: **9,811,608 bytes, 102,504
+  methods, 14,071 classes, 12 dex files, 25,462,860 bytes of dex**; the method total was
+  cross-checked against `dexdump` from build-tools 35.0.1 and agrees exactly. `docs/PERFORMANCE.md`
+  is new: the table plus what the baseline row means, how to reproduce it, and why the build-seconds
+  column is host-specific while the size and count columns are not. `assembleDebug` green, APK
+  9,811,608 bytes (unchanged — tooling and docs only), all 233 unit tests pass,
+  `tools/check-no-ui-change.sh` clean.
 - [ ] **I6. Redaction test.** Assert that a report with a serial number, a Bluetooth name and a
   certificate digest contains none of them when `redacted = true`.
 - [ ] **I7. GitHub Actions CI.** Build and test on every push so a regression is caught by the
