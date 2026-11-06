@@ -423,6 +423,10 @@ build and tests green before committing.
   `assembleDebug` alone needs four 300 s calls, so `minifyReleaseWithR8` cannot be run or checked here.
   *Passed over (6 Nov, second pass):* unchanged — still 2 cores / 2 GB, and a cold `assembleDebug`
   still needs four calls, so there is no room for a non-resumable `minifyReleaseWithR8`.
+  *Passed over (6 Nov, third pass):* unchanged again — `nproc` = 2, `free` = 2,098 MB. A cold
+  `assembleDebug` this run took five calls (about 25 minutes, `mergeExtDexDebug` alone 4m08s at a
+  1750 MB heap), and `minifyReleaseWithR8` still does not fit in a single 300 s call and restarts
+  from zero when the call is killed, so no minified APK can be produced or measured here.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -450,6 +454,8 @@ build and tests green before committing.
   *Passed over (6 Nov run):* same constraint — a single `lintAnalyzeDebug` does not fit in a 300 s call
   on 2 cores, and a half-finished analysis cannot be triaged honestly.
   *Passed over (6 Nov, second pass):* same constraint, unchanged hardware.
+  *Passed over (6 Nov, third pass):* same constraint — a single `lintAnalyzeDebug` does not fit in a
+  300 s call on 2 cores, and a half-finished analysis cannot be triaged honestly.
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -476,6 +482,8 @@ build and tests green before committing.
   still holds; this waits for an item whose measurement has no home in this file.
   *Passed over (6 Nov, second pass):* still duplication — every number it would hold is already next to
   the item that produced it, in this file. Write it once the numbers are stable, at the end of the window.
+  *Passed over (6 Nov, third pass):* unchanged — this run produced a tool (I4), not a measurement, so
+  there is still no number without a home in this file.
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
   makes no new claim, and `LIMITATIONS.md` already covers reference-data coverage and per-API
@@ -573,12 +581,26 @@ would be worse than one honest one.
   No screen, control, style, layout or copy change.
 - [ ] **H7. VPN-aware transport reporting.** With a VPN active, report the underlying transport as well
   as the VPN instead of only "VPN".
-- [ ] **H8. Count packages once.** `getInstalledPackages` is called and walked twice in places; derive
-  system and user counts from a single pass.
+  *Skipped (6 Nov, third pass):* the only way to report the underlying transport is a new row or a
+  changed value in the connectivity list — a visible change. It also needs `NetworkCapabilities`
+  observed under a live VPN, which nothing here can exercise.
+- [x] **H8. Count packages once.** `getInstalledPackages` is called and walked twice in places; derive
+  system and user counts from a single pass. *Already done:* `getInstalledPackages(0)` is called once
+  in `main`, in `SoftwareCollector.collect`, and the single pass over that list increments both the
+  system and the user counter. There is no second call and no second walk left to merge.
 - [ ] **H9. Verified-boot fallbacks.** Fall back to `ro.boot.veritymode` when
   `ro.boot.verifiedbootstate` is absent, and say which property answered.
-- [ ] **H10. Locale audit.** Every `String.format` must pass `Locale.US`; a device set to Arabic or
-  Hindi digits currently renders numbers inconsistently in the report.
+  *Skipped (6 Nov, third pass):* the fallback alone would be invisible on devices that publish
+  `ro.boot.verifiedbootstate`, but the item also asks to "say which property answered", which rewrites
+  the `security.verifiedBoot` source line and the integrity check's explanation and evidence on the
+  security screen — a copy change. The copy-free half could be split out.
+- [x] **H10. Locale audit.** Every `String.format` must pass `Locale.US`; a device set to Arabic or
+  Hindi digits currently renders numbers inconsistently in the report. *Already done:* every
+  `String.format` in `main` passes `Locale.US` explicitly — all 35 sites, no exceptions.
+  The unlocalised `.format` calls that remain are `SimpleDateFormat.format(Date)` on formatters that
+  were themselves built with `Locale.US`, plus `"%02X".format(byte)` in the certificate digest, which
+  is not locale-sensitive: checked on JDK 17 that `%X` stays ASCII under `ar-EG`,
+  `hi-IN-u-nu-deva` and `th-TH-u-nu-thai` while `%d` and `%.1f` switch to native digits.
 - [ ] **H11. Per-volume storage.** Use `StorageManager` to report internal versus adoptable volume free
   space instead of only the data partition.
 - [ ] **H12. Per-core CPU frequencies.** Read max frequency for every core, not just `cpu0`, and report
@@ -590,12 +612,39 @@ would be worse than one honest one.
 
 ## I. Tooling and tests that protect the work
 
-- [ ] **I1. Reference-loader test.** Feed a malformed entry and assert the rest of the set still loads.
-- [ ] **I2. Formatter edge-case tests.** Zero, negative, exactly 1023/1024, and very large byte counts.
-- [ ] **I3. Status exhaustiveness guard.** A unit test asserting every `DiagnosticStatus` and
+- [x] **I1. Reference-loader test.** Feed a malformed entry and assert the rest of the set still loads.
+  *Already done:* `ReferenceAssetParserTest`, 7 tests — a string, `null`, a nested array and a bare
+  number between good entries; a wrong-typed field defaulted rather than dropping the entry; the entry
+  after a bad element keeping every field; absent numerics keeping their defaults; four malformed
+  documents yielding an empty list; and the bundled asset parsing all 16 entries.
+- [x] **I2. Formatter edge-case tests.** Zero, negative, exactly 1023/1024, and very large byte counts.
+  *Already done:* `FormattersTest` pins zero, negative, 1023, 1024, 1_048_575/6, `Long.MAX_VALUE` and
+  `Long.MIN_VALUE` as literal strings, then sweeps 0…200 000, ±2 000 around every power of 1024,
+  ±300 around 41 powers of two and 20 000 random values in each direction against the old
+  `String.format` implementation as the oracle.
+- [x] **I3. Status exhaustiveness guard.** A unit test asserting every `DiagnosticStatus` and
   `ComponentState` maps to a colour and a label, so a future enum value cannot ship unrendered.
-- [ ] **I4. `tools/check-no-ui-change.sh`.** Diffs `ui/` and `res/` against a reference commit and exits
-  non-zero if they changed — the hard rule becomes enforceable instead of aspirational.
+  *Already enforced:* `statusColor` and `statusLabel` (`ui/theme/Theme.kt`) and `stateColor`
+  (`ui/screens/PartsScreen.kt`) are exhaustive `when` expressions over the enums, so adding a
+  `DiagnosticStatus` or `ComponentState` constant is a compile error rather than an unrendered screen.
+  A test here could only restate what the compiler already rejects.
+- [x] **I4. `tools/check-no-ui-change.sh`.** Diffs `ui/` and `res/` against a reference commit and exits
+  non-zero if they changed — the hard rule becomes enforceable instead of aspirational. *Done:* new
+  `tools/check-no-ui-change.sh` (mode 100755, no SDK, Gradle or network needed). It resolves the repo
+  from its own path, so it works from any directory, and compares two paths —
+  `app/src/main/kotlin/com/verifydeviceinfo/ui` and `app/src/main/res` — against a reference that
+  defaults to `HEAD` and can be given as `$1` or `UI_BASELINE` (e.g. `origin/main` for a branch).
+  Tracked changes (staged and unstaged) come from `git diff --name-only <ref>` and untracked files
+  from `git ls-files --others --exclude-standard`, so a new screen file that has not been added yet is
+  caught too. Exit 0 prints the count of tracked files under those paths, exit 1 lists every offending
+  file plus the campaign rule, exit 2 refuses to answer when it cannot compare (not a git checkout, or
+  an unknown reference). Six scenarios were run against this checkout: clean tree → 0; an appended
+  line in `ui/theme/Theme.kt` → 1 naming that file; a new untracked `res/values/probe.xml` → 1; a
+  change to `docs/LIMITATIONS.md` only → 0; `no-such-ref` → 2; `HEAD~1` → 0. A copy of the script in a
+  directory that is not a git checkout → 2. `docs/BUILDING.md` gained a "UI freeze check" section
+  documenting the three invocations. Tooling and docs only: no production file, no `ui/` or `res/`
+  file touched, so `assembleDebug` output is unchanged (`app-debug.apk` 9,811,608 bytes) and all 224
+  unit tests pass.
 - [ ] **I5. `tools/measure.sh`.** Records APK size, method count and a timed debug build into
   `docs/PERFORMANCE.md`, so every claim of "faster" has a number behind it.
 - [ ] **I6. Redaction test.** Assert that a report with a serial number, a Bluetooth name and a

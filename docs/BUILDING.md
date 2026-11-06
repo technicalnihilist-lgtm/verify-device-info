@@ -113,6 +113,24 @@ To add a screen, write another `@Test` in `ScreenshotTest.kt` and call `capture(
 with the composable. The fixture data lives in the same file, so screenshots never depend on a real
 device.
 
+## UI freeze check
+
+The 1-20 November optimisation window allows internal quality work only — no new screens, controls,
+styling, spacing, colours or user-visible copy. Every one of those lives under `ui/` or `res/`, so the
+rule is checkable rather than a matter of memory:
+
+```bash
+tools/check-no-ui-change.sh                 # working tree against HEAD
+tools/check-no-ui-change.sh origin/main     # this branch against another ref
+UI_BASELINE=<sha> tools/check-no-ui-change.sh
+```
+
+It compares tracked changes (staged and unstaged) and untracked files under
+`app/src/main/kotlin/com/verifydeviceinfo/ui` and `app/src/main/res`, prints every file that differs,
+and exits 1 if there is one, 0 if the surface is untouched and 2 if it cannot compare (not a git
+checkout, or an unknown reference). Run it before committing anything that claims to be internal
+only. It needs no SDK, no Gradle and no network.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
