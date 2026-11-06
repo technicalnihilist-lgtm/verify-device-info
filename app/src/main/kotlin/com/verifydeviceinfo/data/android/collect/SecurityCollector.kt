@@ -321,18 +321,31 @@ class SecurityCollector(
         // Documented authenticator bit masks; identical on API 29 and 30+.
         const val AUTH_STRONG = 0x000F
         const val AUTH_WEAK = 0x00FF
+
+        /** The one alias this app ever creates, and always deletes again. */
+        const val PROBE_ALIAS = "verify_device_info_probe"
     }
 
-    /** Generates and deletes a throw-away key to ask the platform where keys are stored. */
-    private fun probeKeystore(): Pair<Boolean?, Boolean> {
-        val alias = "verify_device_info_probe"
-        return try {
-            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    /**
+     * Generates and deletes a throw-away key to ask the platform where keys are stored.
+     *
+     * The alias is fixed, and a keystore refuses to overwrite an existing alias, so a probe that
+     * was interrupted between generating its key and deleting it — process death, or any exception
+     * between the two — used to leave that key in the user's keystore for good. Every later probe
+     * then failed with "alias already exists", which the `catch` below turned into `null to false`:
+     * the hardware-keystore and attestation evidence went missing on every subsequent scan of that
+     * install, permanently, with nothing on screen to say why. [withThrowAwayKey] clears the alias
+     * before the key is generated as well as after, so one bad probe can no longer poison the next
+     * and nothing is left behind in either case.
+     */
+    private fun probeKeystore(): Pair<Boolean?, Boolean> = try {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        withThrowAwayKey(keyStore, PROBE_ALIAS) {
             val generator = KeyGenerator.getInstance(
                 KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
             )
             val spec = KeyGenParameterSpec.Builder(
-                alias,
+                PROBE_ALIAS,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
             )
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -348,15 +361,11 @@ class SecurityCollector(
             // boolean, so adopting it would change the value this evidence reports on upgrade.
             @Suppress("DEPRECATION")
             val insideHardware = info.isInsideSecureHardware
-            val attestation = keyStore.getCertificateChain(alias)?.isNotEmpty() == true
-            try {
-                keyStore.deleteEntry(alias)
-            } catch (ignored: Exception) {
-            }
+            val attestation = keyStore.getCertificateChain(PROBE_ALIAS)?.isNotEmpty() == true
             insideHardware to attestation
-        } catch (e: Exception) {
-            null to false
         }
+    } catch (e: Exception) {
+        null to false
     }
 
     private fun readSignatureDigest(): String? = try {
@@ -381,5 +390,26 @@ class SecurityCollector(
         }
     } catch (e: Exception) {
         null
+    }
+}
+
+/**
+ * Runs [block] with [alias] free in [keyStore], and leaves it free afterwards.
+ *
+ * Two things are needed for that. Anything a previous run left at [alias] is removed *before*
+ * [block] starts, because a keystore refuses to overwrite an existing alias — a key left behind by
+ * an interrupted probe would otherwise make every later probe fail. And the alias is removed again
+ * in a `finally`, so an exception inside [block] cannot leave the key in the user's keystore either.
+ * Both deletions ignore failures: a store that cannot delete is not a reason to lose the reading.
+ *
+ * [KeyStore] rather than the Android keystore specifically, so this is unit-testable against a
+ * plain JVM keystore with no device and no Robolectric.
+ */
+internal fun <T> withThrowAwayKey(keyStore: KeyStore, alias: String, block: () -> T): T {
+    runCatching { keyStore.deleteEntry(alias) }
+    try {
+        return block()
+    } finally {
+        runCatching { keyStore.deleteEntry(alias) }
     }
 }

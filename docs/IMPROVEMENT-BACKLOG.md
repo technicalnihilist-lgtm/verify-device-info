@@ -441,6 +441,9 @@ build and tests green before committing.
   *Passed over (6 Nov, sixth pass):* unchanged — `nproc` = 2, 2,098 MB. This run's cold
   `assembleDebug` needed six calls and a further one for `testDebugUnitTest`, so the non-resumable
   `minifyReleaseWithR8` still has nowhere to run. Nothing in the release path can be checked here.
+  *Passed over (7 Nov run):* unchanged — `nproc` = 2, 2,098 MB. This run's cold `assembleDebug`
+  needed seven calls and `testDebugUnitTest` two more, so a non-resumable `minifyReleaseWithR8`
+  still has nowhere to run here.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -477,6 +480,8 @@ build and tests green before committing.
   `lintAnalyzeDebug` has no room to finish either.
   *Passed over (6 Nov, sixth pass):* same constraint — this run's cold `assembleDebug` alone took six
   300 s calls on 2 cores, so a single non-resumable `lintAnalyzeDebug` cannot be finished or triaged.
+  *Passed over (7 Nov run):* unchanged — 2 cores, and a single non-resumable `lintAnalyzeDebug`
+  still does not fit in a 300 s call, so nothing could be triaged honestly.
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -515,6 +520,8 @@ build and tests green before committing.
   numbers are stable.
   *Passed over (6 Nov, sixth pass):* this run produced no measurement — a CI workflow and two
   already-covered backlog items — so there is still no number without a home in this file.
+  *Passed over (7 Nov run):* this run's finding (an interrupted keystore probe poisoning every
+  later one) is recorded in full in J1's own entry, so a second copy still would not pay for itself.
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
   makes no new claim, and `LIMITATIONS.md` already covers reference-data coverage and per-API
@@ -554,6 +561,8 @@ would be worse than one honest one.
   set this app does not carry. Belongs to a design pass, not this one.
   *Passed over (6 Nov, fourth pass):* unchanged — a new authenticity finding is a new card, which the
   UI freeze forbids, and the vendor table is still data the app does not carry.
+  *Skipped (7 Nov run):* unchanged — a new authenticity finding is a new card, which the UI freeze
+  forbids, and the vendor table is still data the app does not carry.
 - [x] **H3. Battery health code 0 means unknown, not good.** `BATTERY_HEALTH_UNKNOWN` is currently
   scored like a healthy pack; treat it as missing evidence. *Done:* in `DefaultPartsProvider` the
   battery branch tested `healthCode != 2 && healthCode > 0`, which sent code 1 (`BATTERY_HEALTH_UNKNOWN`)
@@ -594,6 +603,8 @@ would be worse than one honest one.
   camera screen — a visible change. The precedence itself is worth documenting in the code later.
   *Passed over (6 Nov, fourth pass):* unchanged — "expose the other value" is a second value on the
   camera screen.
+  *Passed over (7 Nov run):* unchanged — "expose the other value" is a second value on the camera
+  screen.
 - [x] **H6. Replace deprecated `getRealMetrics`.** Use `WindowMetrics` on API 30+ with the old path as
   fallback; behaviour must stay identical on every API level. *Done:* `HardwareCollector.readDisplay`
   no longer calls `Display.getRealMetrics` above API 29. A new private
@@ -620,6 +631,8 @@ would be worse than one honest one.
   changed value in the connectivity list — a visible change. It also needs `NetworkCapabilities`
   observed under a live VPN, which nothing here can exercise.
   *Passed over (6 Nov, fourth pass):* unchanged — still a new row, and still no live VPN to observe.
+  *Passed over (7 Nov run):* unchanged — a new row in the connectivity list, and still no live VPN
+  to observe.
 - [x] **H8. Count packages once.** `getInstalledPackages` is called and walked twice in places; derive
   system and user counts from a single pass. *Already done:* `getInstalledPackages(0)` is called once
   in `main`, in `SoftwareCollector.collect`, and the single pass over that list increments both the
@@ -632,6 +645,8 @@ would be worse than one honest one.
   security screen — a copy change. The copy-free half could be split out.
   *Passed over (6 Nov, fourth pass):* unchanged — the fallback alone buys nothing on devices that
   publish `ro.boot.verifiedbootstate`, and "say which property answered" is copy.
+  *Passed over (7 Nov run):* unchanged — "say which property answered" is copy, and the fallback
+  alone changes nothing on a device that publishes `ro.boot.verifiedbootstate`.
 - [x] **H10. Locale audit.** Every `String.format` must pass `Locale.US`; a device set to Arabic or
   Hindi digits currently renders numbers inconsistently in the report. *Already done:* every
   `String.format` in `main` passes `Locale.US` explicitly — all 35 sites, no exceptions.
@@ -644,6 +659,7 @@ would be worse than one honest one.
   *Passed over (6 Nov, fourth pass):* reporting a second volume means new rows ("Internal"/"Adoptable")
   in the storage group — a visible change. The copy-free half would be reporting only the primary
   volume, which is exactly what it already does.
+  *Passed over (7 Nov run):* unchanged — a second volume means new rows in the storage group.
 - [x] **H12. Per-core CPU frequencies.** Read max frequency for every core, not just `cpu0`, and report
   the cluster layout when it is readable. *Done (frequency half; cluster layout dropped):* `cpu0` is a
   LITTLE core on every ARM big.LITTLE/DynamIQ part, so the old `cpu0/cpufreq/cpuinfo_max_freq` lookup
@@ -671,6 +687,7 @@ would be worse than one honest one.
   *Passed over (6 Nov, fourth pass):* a second uptime value is a second row (or a changed label) on the
   overview and in the report — a visible change. The copy-free part, renaming the misleading internal
   `uptimeMillis` field, is a rename with no behaviour to test.
+  *Passed over (7 Nov run):* unchanged — a second uptime value is a second row.
 - [ ] **H14. Reference codenames.** Add codename patterns to the reference entries so matching works
   for builds whose `Build.MODEL` is a carrier variant.
   *Skipped (6 Nov, fifth pass):* the mechanism is already there — `ReferenceIndex.match` takes the
@@ -681,6 +698,8 @@ would be worse than one honest one.
   adding them from memory would put unsourced identifiers into a set whose whole point is that each
   entry can be checked. Re-scope as "add codenames for the entries whose codename is documented on
   the recorded source", or add a source for codenames first.
+  *Skipped (7 Nov run):* unchanged — this is missing data, not missing code, and the codenames are
+  still not on the recorded `sourceUrl` pages.
 
 ## I. Tooling and tests that protect the work
 
@@ -765,6 +784,8 @@ would be worse than one honest one.
   tests green locally: `assembleDebug` succeeded, `testDebugUnitTest` passed all 233 tests, APK
   unchanged at 9,811,608 bytes, `tools/check-no-ui-change.sh` clean (no `ui/` or `res/` file touched).
 - [ ] **I8. Lint triage.** Run `gradle lint`, fix real findings, suppress the rest with a written reason.
+  *Passed over (7 Nov run):* unchanged — same constraint as F3: `lintAnalyzeDebug` does not finish
+  in one 300 s call on 2 cores.
 - [x] **I9. Screenshot non-blank assertion.** Fail the render test if an image comes back uniform.
   *Already done:* `ScreenshotTest` measures every capture (distinct colours and ink fraction) and
   fails with the measured numbers when a screen comes back blank, and `aBlankFrameIsRejected` renders
@@ -773,6 +794,76 @@ would be worse than one honest one.
   checkbox was simply never ticked.
 - [ ] **I10. Dependency audit.** Record the resolved dependency tree and flag anything unexpectedly
   large.
+  *Passed over (7 Nov run):* F5 already resolved and audited the release classpath (149 modules,
+  every top-level entry mapped to a declared dependency), so a second recorded tree would only
+  duplicate it. Re-scope as per-artefact byte sizes if that is what is wanted.
+
+## J. Audit findings — 7 November run
+
+The twelve items left open above are all either blocked by this sandbox (F1, F3, I8: 2 cores and
+2,098 MB, where a cold `assembleDebug` alone needs seven 300 s calls and `minifyReleaseWithR8` and
+`lintAnalyzeDebug` are not resumable), duplicates of work already recorded (G1, I10), or they need a
+visible change (H2, H5, H7, H9, H11, H13) or data the app does not carry (H14). So the list was
+re-read against the code, as "When the list runs out" asks, and the three findings below were added.
+J1 was implemented in this run.
+
+- [x] **J1. A leftover probe key disables the hardware-keystore evidence for good.**
+  `SecurityCollector.probeKeystore` generates a throw-away AES key under the fixed alias
+  `verify_device_info_probe`, reads `KeyInfo.isInsideSecureHardware` and the certificate chain, and
+  then deletes the key. The delete was not in a `finally` and nothing cleared the alias *before*
+  generating, so any probe interrupted between `generateKey()` and `deleteEntry()` — process death
+  mid-scan, or an exception from `getKeySpec`/`getCertificateChain` — left that key in the user's
+  keystore permanently. A keystore refuses to overwrite an existing alias, so `generator.init(spec)`
+  then threw on *every* later scan, the surrounding `catch` turned it into `null to false`, and the
+  app reported "Hardware-backed keystore: Unavailable" and "Hardware attestation: Not available"
+  for the life of that install, with nothing on screen to say why. One bad probe, then: permanent
+  silent loss of two security facts, plus a key left in the user's keystore. *Done:* the
+  generate-read-delete body moved behind a new
+  `withThrowAwayKey(keyStore, alias) { … }` (`data/android/collect/SecurityCollector.kt`)
+  that deletes `alias` before the block runs and again in a `finally`, ignoring a failed delete
+  because a store that cannot delete must not cost the reading. The alias is now a
+  `PROBE_ALIAS` constant. Nothing else changed: same key parameters, same two values read, same
+  field text, same statuses, so a device whose probe succeeds reports exactly what it reported
+  before — the change only affects a device that was already reporting nothing. Six tests in
+  `SecurityProbeKeyTest` run the helper against a plain JVM `PKCS12` keystore (no device, no
+  Robolectric): a stale entry is gone when the block starts, the key the block creates is gone when
+  it returns, it is gone when the block throws, a stale key does not survive a block that fails
+  before generating its own, the block's value is returned unchanged, and an absent alias is not an
+  error. Verified that the test catches the bug: with the pre-clear line removed, `a key left behind
+  by an earlier probe is removed before the probe runs` fails with the alias still occupied;
+  restored, it passes. `assembleDebug` green, no compiler warnings in this run's build logs; all 239
+  unit tests pass (233 before, 6 new); `tools/check-no-ui-change.sh` clean. APK: 9,910,289 bytes
+  for the previous source and 9,910,999 for this one, rebuilt back to back on this host —
+  **+710 bytes**, the code alone. (The same source built cold at the start of this run produced
+  9,811,608 bytes, so the debug APK is not
+  byte-reproducible across builds on this toolchain; the back-to-back pair is the honest comparison.)
+  Not verified on a device: the sticky-failure path needs a real keystore, so what is pinned here is
+  the helper's contract, and the call site is verified by inspection.
+- [ ] **J2. `PdfReportGenerator` lowercases the spec label once per comparison.**
+  `report.snapshot.fields.sortedBy { it.label.lowercase() }` (line 82) calls the selector O(n log n)
+  times, allocating a fresh lowercased string on both sides of every comparison — a few
+  thousand throw-away strings for the A–Z section of one export — and `lowercase()` uses
+  the default locale, so a device set to Turkish sorts `I` as `ı` and the report's A–Z section comes
+  out in a different order. *Change:* decorate-sort-undecorate (map to `label.lowercase(Locale.US)`
+  once, sort on that key, map back), which keeps the sort stable and therefore byte-identical for
+  every non-Turkish locale. *Test:* a fixture with mixed-case labels asserts the same order under
+  `tr-TR` and `en-US`; count the selector calls to prove it runs once per field.
+- [ ] **J3. `Formatters.date`/`dateOnly`/`utcDate` build a `SimpleDateFormat` per call.** Twelve call
+  sites, including one per history row (`HistoryScreen`) and per row of the PDF, so a 50-entry
+  history render constructs 50 formatters, each with its own `Calendar` and locale data. *Change:*
+  hold one formatter per format string in a `ThreadLocal` (they are not thread-safe and the call
+  sites are on both the main thread and `Dispatchers.IO`), keeping the same patterns, `Locale.US` and
+  the `utcDate` time zone so every rendered string is unchanged. *Test:* the existing
+  `FormattersTest` strings must stay identical, plus a two-thread test that the cached formatter
+  never returns another thread's date.
+
+Environment note for future runs: this sandbox's Maven Central hosts (`repo1.maven.org` and
+`repo.maven.apache.org`) answered **429** with `Retry-After: 86025` during this run, which broke
+`testDebugUnitTest` on all 64 Robolectric tests ("Failed to fetch maven artifact
+org.robolectric:android-all-instrumented:15-…"). The jar from the run's first, successful fetch was
+copied into `~/.m2/repository/org/robolectric/android-all-instrumented/15-robolectric-12650502-i7/`
+and the suite then ran normally offline. `maven-central.storage-download.googleapis.com` serves the
+same artefacts and is reachable when the two Maven hosts are not.
 
 ---
 
