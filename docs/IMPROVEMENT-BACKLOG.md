@@ -453,6 +453,10 @@ build and tests green before committing.
   killed, so no minified APK exists to measure. Reverted to `isMinifyEnabled = false`; the
   release path is untouched. This task needs a host where one Gradle invocation can run longer
   than 300 s, not another retry here.
+  *Passed over (7 Nov, third pass):* not retried again — `nproc` = 2, 2,098 MB, the same host on
+  which R8 was already attempted twice today and where a killed call still discards all of its work.
+  This run's cold `assembleDebug` needed five 300 s calls, so there is no window for a
+  non-resumable `minifyReleaseWithR8`.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -491,6 +495,8 @@ build and tests green before committing.
   300 s calls on 2 cores, so a single non-resumable `lintAnalyzeDebug` cannot be finished or triaged.
   *Passed over (7 Nov run):* unchanged — 2 cores, and a single non-resumable `lintAnalyzeDebug`
   still does not fit in a 300 s call, so nothing could be triaged honestly.
+  *Passed over (7 Nov, third pass):* unchanged — same 2 cores / 2,098 MB, and this run's cold
+  `assembleDebug` took five 300 s calls on its own, so the analysis cannot be finished or triaged.
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -879,7 +885,7 @@ J1 was implemented in this run.
   input order (stability), and an empty list staying empty. `assembleDebug` green, all 245 unit
   tests pass (239 before, 6 new), `tools/check-no-ui-change.sh` clean — no file under `ui/` or
   `res/` touched.
-- [ ] **J3. `Formatters.date`/`dateOnly`/`utcDate` build a `SimpleDateFormat` per call.** Twelve call
+- [x] **J3. `Formatters.date`/`dateOnly`/`utcDate` build a `SimpleDateFormat` per call.** Twelve call
   sites, including one per history row (`HistoryScreen`) and per row of the PDF, so a 50-entry
   history render constructs 50 formatters, each with its own `Calendar` and locale data. *Change:*
   hold one formatter per format string in a `ThreadLocal` (they are not thread-safe and the call
@@ -887,6 +893,41 @@ J1 was implemented in this run.
   the `utcDate` time zone so every rendered string is unchanged. *Test:* the existing
   `FormattersTest` strings must stay identical, plus a two-thread test that the cached formatter
   never returns another thread's date.
+  *Done (7 Nov, third pass):* the three formatters now live in a private `DateFormats` holder kept in
+  one `ThreadLocal` (`core/util/Formatters.kt`), built on first use per thread; `date`/`dateOnly`/
+  `utcDate` are one `format` call each on the cached instance. Patterns, `Locale.US`, the quoted
+  `'UTC'` literal and the `utcDate` zone are unchanged, and the `<= 0` → `"Unavailable"` guard is
+  untouched, so every rendered string is the same. One thing the item did not name: a cached
+  formatter freezes the time zone it was built with, and a *new* `SimpleDateFormat` picks up the
+  current default zone, so a cache alone would keep rendering local times in the old zone after the
+  user travels or changes it in Settings, until the process restarted. `formats()` therefore
+  compares `TimeZone.getDefault()` against the zone the holder was built with and re-points
+  `dateTime`/`dateOnly` when it differs; `utc` is pinned to UTC and never re-pointed. That check is
+  the whole cost of the correctness fix — measured below, ~7 ns.
+  *Measured* (JDK 17, 2,000,000 formatted calls, best of 5 rounds, 64 timestamps; the same JVM the
+  unit tests run on, not a device): `new SimpleDateFormat(pattern, Locale.US).format(..)` per call
+  **2,006.3 ns** and **2,256 bytes allocated** per call; cached per thread **886.3 ns** and **688
+  bytes** — **2.26× faster, 1,568 fewer bytes per call**; with the default-zone check **892.9 ns**,
+  i.e. the check costs **6.6 ns, 0.7%**. A 50-row history render therefore goes from **100.3 µs to
+  44.3 µs** of formatting. Outputs verified identical to the old implementation on all 64
+  timestamps before the code was changed. No APK size claim: this run's pre-change and post-change
+  debug builds were 9,811,608 and 9,875,628 bytes, a 64 KB gap that is far larger than one small
+  class and matches the non-reproducibility already recorded under J1/J2, so the pair says nothing
+  about this change.
+  *Tests:* nine new cases in `FormattersDateTest` (the file had no date assertions at all before
+  this). Pinned strings for all three formats with the default zone fixed to `Asia/Kolkata`;
+  `utcDate` unchanged across three different default zones; the `null`/`0`/`-1`/`Long.MIN_VALUE`
+  `"Unavailable"` guard; **the default-zone change is followed** (Kolkata → New York → UTC, which is
+  exactly what a naive frozen cache would fail); consecutive calls do not carry one date into the
+  next; eight threads formatting their own timestamp 2,000 times each behind a `CountDownLatch`,
+  asserted against single-threaded references — the guard against a shared, non-thread-safe
+  formatter; and month names unchanged with the default locale forced to `tr-TR`. Verified the
+  zone test catches the bug: with the re-pointing removed, `localDatesFollowAChangeOfDefaultZone`
+  fails on the New York assertion; restored, it passes. `assembleDebug` green with **0 compiler
+  warnings** (the first attempt inferred `ThreadLocal<DateFormats?>` from `withInitial` and emitted
+  four nullability warnings, so the holder is initialised explicitly instead); all **254** unit
+  tests pass (245 before, 9 new). No file under `ui/` or `res/` touched — a whole-tree `diff -r`
+  against a fresh copy of `main` shows exactly two changed paths, `Formatters.kt` and the new test.
 
 Environment note for future runs: this sandbox's Maven Central hosts (`repo1.maven.org` and
 `repo.maven.apache.org`) answered **429** with `Retry-After: 86025` during this run, which broke
