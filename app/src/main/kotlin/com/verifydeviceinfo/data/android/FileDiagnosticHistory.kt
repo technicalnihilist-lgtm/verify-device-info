@@ -45,17 +45,23 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
                 File(reportDir, "$id.json").writeText(ReportJson.encode(report, redacted = true))
             } catch (ignored: Exception) {
             }
-            val entries = readIndex().toMutableList()
+            // `null` here means the stored index could not be understood, which is not the same
+            // thing as an empty one: the prune below deletes every report file it cannot account
+            // for, so a corrupt index read as "nothing is kept" would destroy the whole history.
+            val previous = readIndex()
+            val entries = (previous ?: emptyList()).toMutableList()
             entries.add(0, entry)
             val kept = entries.take(MAX_INDEX_ENTRIES)
             writeIndex(kept)
             // Reports that fell out of the index can no longer be opened from the History screen,
             // so drop their files as well; otherwise app-private storage grows without bound.
-            runCatching { pruneReports(kept) }
+            runCatching { pruneReports(kept, indexReadable = previous != null) }
             entry
         }
 
-    override suspend fun list(): List<HistoryEntry> = withContext(Dispatchers.IO) { readIndex() }
+    override suspend fun list(): List<HistoryEntry> = withContext(Dispatchers.IO) {
+        readIndex() ?: emptyList()
+    }
 
     override suspend fun loadRaw(reportId: String): String? = withContext(Dispatchers.IO) {
         try {
@@ -72,35 +78,33 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
         Unit
     }
 
-    private fun pruneReports(kept: List<HistoryEntry>) {
+    private fun pruneReports(kept: List<HistoryEntry>, indexReadable: Boolean) {
         val files = reportDir.listFiles() ?: return
-        val stale = staleReportFiles(kept.mapTo(HashSet()) { it.id }, files.map { it.name }).toSet()
+        val stale = staleReportFiles(
+            keptIds = kept.mapTo(HashSet()) { it.id },
+            existingNames = files.map { it.name },
+            indexReadable = indexReadable
+        ).toSet()
         if (stale.isEmpty()) return
         files.forEach { file -> if (file.name in stale) file.delete() }
     }
 
-    private fun readIndex(): List<HistoryEntry> {
+    /**
+     * The stored index, or `null` when the file exists but its contents cannot be understood.
+     *
+     * The two cases are deliberately distinct. An absent index means nothing was ever stored, so
+     * nothing is kept; an unreadable one means the entries are unknown, and [pruneReports] must not
+     * act on "unknown" as if it were "none".
+     */
+    private fun readIndex(): List<HistoryEntry>? {
         val file = indexFile
         if (!file.exists()) return emptyList()
-        return try {
-            val array = JSONArray(file.readText())
-            (0 until array.length()).map { index ->
-                val obj = array.getJSONObject(index)
-                HistoryEntry(
-                    id = obj.getString("id"),
-                    timestampMillis = obj.getLong("timestampMillis"),
-                    modelLabel = obj.getString("modelLabel"),
-                    riskLevel = runCatching { RiskLevel.valueOf(obj.getString("riskLevel")) }
-                        .getOrDefault(RiskLevel.UNKNOWN),
-                    hardwareScore = obj.optInt("hardwareScore", -1).takeIf { it >= 0 },
-                    authenticityScore = obj.optInt("authenticityScore", -1).takeIf { it >= 0 },
-                    issueCount = obj.optInt("issueCount", 0),
-                    reportPath = obj.optString("reportPath").takeIf { it.isNotBlank() }
-                )
-            }
+        val text = try {
+            file.readText()
         } catch (e: Exception) {
-            emptyList()
+            return null
         }
+        return parseHistoryIndex(text)
     }
 
     private fun writeIndex(entries: List<HistoryEntry>) {
@@ -166,8 +170,54 @@ private val REPORT_FILE_NAME =
 /**
  * Names of report files that no longer have an index entry and can be deleted. Pure, so it is
  * unit-testable without a `Context`.
+ *
+ * [indexReadable] is the guard against the destructive reading of a corrupt index: when the stored
+ * index could not be parsed, every stored report looks unaccounted for, and deleting them would turn
+ * one damaged file into the loss of the entire history. Nothing is pruned in that case.
  */
-internal fun staleReportFiles(keptIds: Set<String>, existingNames: List<String>): List<String> =
+internal fun staleReportFiles(
+    keptIds: Set<String>,
+    existingNames: List<String>,
+    indexReadable: Boolean = true
+): List<String> = if (!indexReadable) {
+    emptyList()
+} else {
     existingNames.filter { name ->
         REPORT_FILE_NAME.matches(name) && name.substring(0, name.length - 5) !in keptIds
     }
+}
+
+/**
+ * Parses the history index, tolerating damage entry by entry.
+ *
+ * Returns `null` when the document itself is not a JSON array — the caller has to distinguish that
+ * from an empty history. Inside a readable document a single unusable entry (a missing or blank
+ * `id`, a value of the wrong type, a non-object element) is skipped instead of taking the other
+ * entries with it: this file is rewritten on every save, so one bad entry used to mean the next
+ * save started from an empty list and pruned every stored report.
+ */
+internal fun parseHistoryIndex(text: String): List<HistoryEntry>? {
+    val array = try {
+        JSONArray(text)
+    } catch (e: Exception) {
+        return null
+    }
+    return (0 until array.length()).mapNotNull { index -> parseHistoryEntry(array.optJSONObject(index)) }
+}
+
+/** One index entry, or `null` when it cannot be used. See [parseHistoryIndex]. */
+internal fun parseHistoryEntry(obj: JSONObject?): HistoryEntry? {
+    if (obj == null) return null
+    val id = obj.optString("id").takeIf { it.isNotBlank() } ?: return null
+    return HistoryEntry(
+        id = id,
+        timestampMillis = obj.optLong("timestampMillis", 0L),
+        modelLabel = obj.optString("modelLabel"),
+        riskLevel = runCatching { RiskLevel.valueOf(obj.optString("riskLevel")) }
+            .getOrDefault(RiskLevel.UNKNOWN),
+        hardwareScore = obj.optInt("hardwareScore", -1).takeIf { it >= 0 },
+        authenticityScore = obj.optInt("authenticityScore", -1).takeIf { it >= 0 },
+        issueCount = obj.optInt("issueCount", 0),
+        reportPath = obj.optString("reportPath").takeIf { it.isNotBlank() }
+    )
+}

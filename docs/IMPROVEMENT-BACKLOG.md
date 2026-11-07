@@ -929,6 +929,67 @@ J1 was implemented in this run.
   tests pass (245 before, 9 new). No file under `ui/` or `res/` touched — a whole-tree `diff -r`
   against a fresh copy of `main` shows exactly two changed paths, `Formatters.kt` and the new test.
 
+## K. Audit findings — 7 November run, fourth pass
+
+The twelve items still open above are the same twelve the third pass left: three blocked by this
+sandbox (F1, F3, I8), two duplicates of recorded work (G1, I10), six that need a visible change
+(H2, H5, H7, H9, H11, H13) and one that needs data the app does not carry (H14). Nothing in them
+changed today, so the code was re-read against the same lens — error paths that could be silent,
+work that could be lost, missing tests around a path that rewrites persistent state — and the three
+findings below were added. K1 was implemented in this run.
+
+- [x] **K1. One damaged history-index entry destroys the whole history and deletes every stored
+  report.** `FileDiagnosticHistory.readIndex` parsed the index with `array.getJSONObject(i)` and
+  `obj.getString("id")` inside a single `try`, and any exception made it return `emptyList()`. The
+  index is *rewritten from whatever the read produced* on every save, and the save then prunes every
+  report file that has no index entry — so one unusable entry (a missing or blank `id`, a
+  `timestampMillis` that is not a number, a non-object element, a truncated tail) was read as "no
+  reports are kept", the next save wrote an index containing only the new report, and all 49
+  previous reports were deleted from app-private storage, with the History screen showing one entry
+  and nothing anywhere to say what happened. *Change:* parsing moved to two pure functions,
+  `parseHistoryIndex(text)` and `parseHistoryEntry(obj)`, which skip an unusable entry instead of
+  taking the other entries with it and return `null` — distinct from `emptyList()` — when the
+  document itself is not a JSON array. `readIndex()` now returns `List<HistoryEntry>?`, `list()`
+  maps `null` to an empty list, and `pruneReports` takes an `indexReadable` flag: `staleReportFiles`
+  returns nothing to delete when the index could not be read, so a corrupt index can no longer be
+  mistaken for an empty one. The distinction is deliberately one save deep — the rewritten index is
+  valid again from that save on, and the *next* save prunes the files the recovered index does not
+  mention — so the durable protection is the per-entry tolerance, not the flag; the flag only stops
+  the same save from doing the deleting. A healthy index parses to exactly the same entries, in the
+  same order, so nothing on screen changes.
+  *Tests:* ten new cases in `HistoryIndexParseTest` (Robolectric, for its real `org.json`): an entry
+  missing its `id` does not take the other entries with it; a blank `id` makes only that entry
+  unusable; non-object elements are skipped; a wrong-typed field (`timestampMillis` as a string,
+  `riskLevel` as a number) is defaulted rather than dropping the entry; every field the index writer
+  emits reads back unchanged; an absent score stays absent instead of becoming zero; an unreadable
+  document is unknown, not an empty history (`""`, prose, a bare object, an unterminated array); an
+  empty array is an empty history; nothing is pruned when the index could not be read; and pruning is
+  unchanged when it was read. The pre-fix behaviour of the first case is visible in the removed code
+  — `getString("id")` threw, the single `catch` returned `emptyList()` — but a revert-and-rerun cycle
+  was not run this time (a full compile plus suite is ~15 minutes on this host); the tolerance is
+  asserted directly instead. `assembleDebug` green with no compiler warnings, all **264** unit tests
+  pass (254 before, 10 new), `tools/check-no-ui-change.sh` clean — the whole diff is
+  `FileDiagnosticHistory.kt` plus the new test. Debug APK 9,827,992 bytes; no size claim, because the
+  debug APK is not byte-reproducible on this toolchain (recorded under J1/J2) and no baseline was
+  rebuilt this run.
+- [ ] **K2. `PdfReportGenerator.toPdf` never finishes its last page and never closes the document on
+  the error path.** `PageWriter.close()` — the only caller of `finishPage` for the final page — is
+  dead code: nothing calls it, so the last page is left open when `document.writeTo(…)` runs.
+  `PdfDocument` refuses to write or close while a page is current (`throwIfCurrentPageNotFinished`),
+  and `document.close()` is not in a `finally`, so any exception between `PdfDocument()` and the end
+  leaks the native document and leaves a half-written `verify-device-info-report.pdf` in the cache.
+  *Change:* call `writer.close()` before `writeTo`, wrap the body in `try`/`finally { document.close() }`,
+  and delete the partial file when the write fails. *Test:* a Robolectric test that exports a fixture
+  report and asserts the file exists and is a PDF, plus one that a throwing write leaves no file.
+  Worth doing first thing in the next run that has a warm build.
+- [ ] **K3. `HardwareCollector.guessGpuVendor` compares a lowercased string with a mixed-case
+  literal.** `lower.contains("rDNA")` can never be true, because `lower` came from
+  `renderer.lowercase()`: the RDNA half of the `"AMD (Samsung Xclipse)"` branch is dead. *Change:*
+  compare against `"rdna"`. *Test:* a fixture table of renderer strings and their expected vendors.
+  This changes one rendered value — the "GPU vendor" row reads `Unknown` today on a renderer string
+  that only names RDNA — so it needs the same sign-off H1/H12 took; it is data, not copy, and only a
+  device that reports nothing today reports something after.
+
 Environment note for future runs: this sandbox's Maven Central hosts (`repo1.maven.org` and
 `repo.maven.apache.org`) answered **429** with `Retry-After: 86025` during this run, which broke
 `testDebugUnitTest` on all 64 Robolectric tests ("Failed to fetch maven artifact
