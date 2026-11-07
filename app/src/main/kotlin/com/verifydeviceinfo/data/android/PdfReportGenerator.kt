@@ -7,6 +7,7 @@ import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import com.verifydeviceinfo.core.model.DeviceReport
 import com.verifydeviceinfo.core.model.DiagnosticStatus
+import com.verifydeviceinfo.core.model.SpecField
 import com.verifydeviceinfo.core.model.ComponentState
 import com.verifydeviceinfo.core.model.ScoreBand
 import com.verifydeviceinfo.core.util.Formatters
@@ -79,7 +80,7 @@ class PdfReportGenerator(private val context: Context) : ReportGenerator {
         // ---- Specs ----
         writer.section("3. Specifications (A–Z)")
         report.snapshot.fields
-            .sortedBy { it.label.lowercase() }
+            .alphabeticalByLabel()
             .forEach { field ->
                 val value = if (report.redacted && field.sensitive) "Redacted" else field.value
                 writer.keyValue(field.label, "$value  [${field.status.name}, ${field.confidence.name} confidence]")
@@ -368,3 +369,22 @@ class PdfReportGenerator(private val context: Context) : ReportGenerator {
         }
     }
 }
+
+/**
+ * Alphabetical order for the report's A–Z section, keyed once per field.
+ *
+ * The previous `sortedBy { it.label.lowercase() }` ran the selector O(n log n) times and
+ * lowercased both sides of every comparison, allocating two throw-away strings per comparison —
+ * a few thousand of them for the A–Z section of one export. Here each key is built once per
+ * field, and [sortedWith] is stable, so the order is identical to the old one.
+ *
+ * The key uses `lowercase()`, which is the invariant (locale-independent) mapping — the same
+ * call the old selector made, so this changes no ordering on any device locale.
+ *
+ * [labelOf] is the label selector, injectable so a test can count how often it runs.
+ */
+internal fun List<SpecField>.alphabeticalByLabel(
+    labelOf: (SpecField) -> String = { it.label }
+): List<SpecField> = map { labelOf(it).lowercase() to it }
+    .sortedWith(compareBy { it.first })
+    .map { it.second }

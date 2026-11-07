@@ -444,6 +444,15 @@ build and tests green before committing.
   *Passed over (7 Nov run):* unchanged — `nproc` = 2, 2,098 MB. This run's cold `assembleDebug`
   needed seven calls and `testDebugUnitTest` two more, so a non-resumable `minifyReleaseWithR8`
   still has nowhere to run here.
+  *Attempted and passed over (7 Nov, second pass):* this run did try again rather than assume.
+  `isMinifyEnabled = true` was applied and the whole release input chain built
+  (`:app:compileReleaseKotlin` alone needed two calls, 3m57s in the second), then
+  `:app:minifyReleaseWithR8` was run twice with **every** prerequisite UP-TO-DATE and the
+  configuration cache reused, so the calls went straight into R8: it still did not finish inside a
+  288 s call (~265 s of pure R8 on 2 cores / 2,098 MB), and it restarts from zero when the call is
+  killed, so no minified APK exists to measure. Reverted to `isMinifyEnabled = false`; the
+  release path is untouched. This task needs a host where one Gradle invocation can run longer
+  than 300 s, not another retry here.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -839,7 +848,7 @@ J1 was implemented in this run.
   byte-reproducible across builds on this toolchain; the back-to-back pair is the honest comparison.)
   Not verified on a device: the sticky-failure path needs a real keystore, so what is pinned here is
   the helper's contract, and the call site is verified by inspection.
-- [ ] **J2. `PdfReportGenerator` lowercases the spec label once per comparison.**
+- [x] **J2. `PdfReportGenerator` lowercases the spec label once per comparison.**
   `report.snapshot.fields.sortedBy { it.label.lowercase() }` (line 82) calls the selector O(n log n)
   times, allocating a fresh lowercased string on both sides of every comparison — a few
   thousand throw-away strings for the A–Z section of one export — and `lowercase()` uses
@@ -848,6 +857,28 @@ J1 was implemented in this run.
   once, sort on that key, map back), which keeps the sort stable and therefore byte-identical for
   every non-Turkish locale. *Test:* a fixture with mixed-case labels asserts the same order under
   `tr-TR` and `en-US`; count the selector calls to prove it runs once per field.
+  *Done (7 Nov, second pass) — with a correction to this item's premise:* the allocation half was
+  real, the locale half was not. Kotlin's `String.lowercase()` is the **invariant** mapping
+  (`toLowerCase(Locale.ROOT)`), not the default-locale one, so the "Turkish `I` sorts as `ı`"
+  claim above is wrong: the A–Z section never depended on device locale and nothing needed
+  fixing there. *Change:* the sort moved into `List<SpecField>.alphabeticalByLabel(labelOf)`, a
+  top-level internal function in `data/android/PdfReportGenerator.kt`, which builds the lowercased
+  key **once per field**, sorts on those keys with the stable `sortedWith(compareBy { it.first })`
+  and maps back. The key still uses invariant `lowercase()`, and the sort is still stable, so the
+  rendered order is identical to before on every locale; the call site is now
+  `.alphabeticalByLabel()`. *Measured* (selector evaluations counted on the JDK's TimSort, the
+  sort Kotlin's `sortedBy` uses): 10 fields 46 → 10, 50 fields 446 → 50, 60 fields 566 → 60,
+  100 fields 1,078 → 100, 1,000 fields 15,484 → 1,000 — i.e. two lowercased strings per
+  comparison (O(n log n)) down to one per field. Debug APK rebuilt back to back on this host:
+  9,874,112 bytes before, 9,874,853 after, **+741 bytes** (the helper plus its call; the debug APK
+  is not byte-reproducible across builds, so the back-to-back pair is the honest comparison).
+  *Tests:* six in `PdfReportAlphabeticalOrderTest` — order identical to the old selector, order
+  unchanged with the default locale forced to `tr-TR` (a regression guard should anyone later
+  switch to a default-locale lowercase), the key function called exactly once per field (counted),
+  the old selector shown to run more than 4n times on the same fixture, equal keys keeping their
+  input order (stability), and an empty list staying empty. `assembleDebug` green, all 245 unit
+  tests pass (239 before, 6 new), `tools/check-no-ui-change.sh` clean — no file under `ui/` or
+  `res/` touched.
 - [ ] **J3. `Formatters.date`/`dateOnly`/`utcDate` build a `SimpleDateFormat` per call.** Twelve call
   sites, including one per history row (`HistoryScreen`) and per row of the PDF, so a 50-entry
   history render constructs 50 formatters, each with its own `Calendar` and locale data. *Change:*
@@ -863,7 +894,12 @@ Environment note for future runs: this sandbox's Maven Central hosts (`repo1.mav
 org.robolectric:android-all-instrumented:15-…"). The jar from the run's first, successful fetch was
 copied into `~/.m2/repository/org/robolectric/android-all-instrumented/15-robolectric-12650502-i7/`
 and the suite then ran normally offline. `maven-central.storage-download.googleapis.com` serves the
-same artefacts and is reachable when the two Maven hosts are not.
+same artefacts and is reachable when the two Maven hosts are not. *Confirmed again on 7 Nov:* both
+Maven hosts answered 429 to Gradle itself, so the build ran with a local init script (never
+committed) that prepends the Google mirror to `dependencyResolutionManagement` and
+`pluginManagement`, and with `ROBOLECTRIC_DEPENDENCY_DIR` pointed at the five
+`android-all-instrumented` jars (API 29, 30, 33, 34, 35) fetched from that mirror — the build file
+already honours both. With that, `assembleDebug` and `testDebugUnitTest` run normally here.
 
 ---
 
