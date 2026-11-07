@@ -1002,13 +1002,38 @@ findings below were added. K1 was implemented in this run.
   against 9,827,992 for this run's pre-change build — a 64 KB gap for one small helper, the same
   non-reproducibility recorded under J1/J2, so no size claim. No UI, copy or layout change: the
   whole diff is `PdfReportGenerator.kt` plus the new test.
-- [ ] **K3. `HardwareCollector.guessGpuVendor` compares a lowercased string with a mixed-case
+- [x] **K3. `HardwareCollector.guessGpuVendor` compares a lowercased string with a mixed-case
   literal.** `lower.contains("rDNA")` can never be true, because `lower` came from
   `renderer.lowercase()`: the RDNA half of the `"AMD (Samsung Xclipse)"` branch is dead. *Change:*
   compare against `"rdna"`. *Test:* a fixture table of renderer strings and their expected vendors.
   This changes one rendered value — the "GPU vendor" row reads `Unknown` today on a renderer string
   that only names RDNA — so it needs the same sign-off H1/H12 took; it is data, not copy, and only a
   device that reports nothing today reports something after.
+  *Done (7 Nov, fifth pass):* the dead half is fixed and the matcher is now testable. The private
+  `HardwareCollector.guessGpuVendor(renderer: String)` became a top-level `internal fun
+  gpuVendorOf(renderer: String?)` in the same package, so the mapping can be pinned without a
+  `Context` and without Robolectric, and the nullable parameter folds the `renderer?.let { … }` call
+  site into the function. The needle is `"rdna"`. Proven before/after on the JDK itself:
+  `"AMD RDNA 2".lowercase()` is `"amd rdna 2"`, for which `contains("rDNA")` is **false** (the old
+  code) and `contains("rdna")` is **true** (the new one), so a renderer naming RDNA and nothing else
+  went from `null` → "Unknown" on the GPU vendor row to "AMD (Samsung Xclipse)". Nothing else moves:
+  every other needle was already lowercase, `"xclipse"` already matched, an unmatched renderer still
+  returns `null`, and the returned strings — the row's copy — are unchanged. Sign-off taken on the
+  same terms as H1/H12: this is a reported **value**, not copy, layout or a control, and only a device
+  that says "Unknown" today says something after.
+  *Tests:* six cases in the new `GpuVendorTest`, a plain JVM test: the exact regression
+  (`"AMD RDNA 2"` → AMD); RDNA in five spellings and cases; Xclipse in three; a twelve-row renderer
+  table covering every branch (`Adreno`/`kgsl` → Qualcomm, `Mali` → Arm, `PowerVR`/`Rogue` →
+  Imagination, `Xclipse`/`RDNA` → AMD) with mixed case on both sides; five renderers that name no
+  known vendor, which must stay `null` rather than become a guess; and `null`/blank input.
+  `assembleDebug` green with no compiler warnings, all **277** unit tests pass (271 before, 6 new),
+  `tools/check-no-ui-change.sh` clean — the whole diff is `HardwareCollector.kt` plus the new test.
+  Debug APK 9,827,992 bytes; no size claim, since the debug APK is not byte-reproducible on this
+  toolchain (J1/J2) and this run rebuilt no pre-change baseline.
+  *Note for future audits:* this was the only mixed-case comparison against a lowercased string in
+  `app/src/main` — every other `lowercase()` site (`SystemPropertyReader.getBooleanFlag`, the PDF
+  label sort, the three UI `name.lowercase()` calls) compares against lowercase literals or only
+  produces a key.
 
 Second pass, 7 November: the twelve items above are unchanged — F1, F3 and I8 are still blocked by
 this sandbox (2 cores, 2,098 MB: `minifyReleaseWithR8` and `lintAnalyzeDebug` do not finish in a
@@ -1017,6 +1042,21 @@ H9, H11 and H13 still need a visible change, H14 still needs data the app does n
 still needs the sign-off H1/H12 took. K2 was implemented in this run. Note for future runs: on this
 host `compileDebugKotlin` alone takes ~4.5 min and `compileDebugUnitTestKotlin` ~4 min, so each
 compile needs its own 300 s call; a single `assembleDebug` that spans a source change will not fit.
+
+Fifth pass, 7 November: the twelve items above are unchanged — F1, F3 and I8 are still blocked by
+this sandbox, G1 and I10 are still duplicates, H2, H5, H7, H9, H11 and H13 still need a visible
+change and H14 still needs data the app does not carry. **K3 was implemented in this run**; its
+sign-off question is settled by the H1/H12 precedent, and the change is a value correction in an
+already-published row. One new build fact, worth more than the item: pinning Gradle to a single
+worker makes this host usable. With the repo's `org.gradle.workers.max=2` on 2 cores, `mergeExtDexDebug`
+was killed at 280 s on three consecutive `assembleDebug` calls and restarted from zero each time;
+with `--max-workers=1` the same task finished in **2m18s**, and the whole `assembleDebug` then
+completed in 3m30s and `testDebugUnitTest` in 3m35s. The two workers were not running in parallel
+so much as thrashing a 2 GB machine. Future runs should pass `--max-workers=1` and
+`-Dorg.gradle.jvmargs="-Xmx1750m -XX:MaxMetaspaceSize=448m …"`, unset the sandbox's
+`JAVA_TOOL_OPTIONS`, and keep `--offline` for the main source sets only: the unit-test classpath
+(`junit:junit:4.13.2` and the rest) is not in the cold cache, so `compileDebugUnitTestKotlin` must
+run online once. Robolectric's runtime jars fetched normally from Maven Central this run (no 429).
 
 Environment note for future runs: this sandbox's Maven Central hosts (`repo1.maven.org` and
 `repo.maven.apache.org`) answered **429** with `Retry-After: 86025` during this run, which broke

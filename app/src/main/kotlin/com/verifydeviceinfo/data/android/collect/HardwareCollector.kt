@@ -224,7 +224,7 @@ class HardwareCollector(
             cpuAbis = abis,
             cpuMaxFreqKhz = maxFreq,
             gpuRenderer = renderer,
-            gpuVendor = renderer?.let { guessGpuVendor(it) },
+            gpuVendor = gpuVendorOf(renderer),
             glesVersion = gles,
             vulkanSupported = vulkan,
             fields = fields,
@@ -410,15 +410,28 @@ class HardwareCollector(
         }
         return null
     }
+}
 
-    private fun guessGpuVendor(renderer: String): String? {
-        val lower = renderer.lowercase()
-        return when {
-            lower.contains("adreno") || lower.contains("kgsl") -> "Qualcomm"
-            lower.contains("mali") -> "Arm"
-            lower.contains("powervr") || lower.contains("rogue") -> "Imagination Technologies"
-            lower.contains("xclipse") || lower.contains("rDNA") -> "AMD (Samsung Xclipse)"
-            else -> null
-        }
+/**
+ * The GPU vendor implied by a GL renderer string, or `null` when the string names none it knows.
+ *
+ * The renderer string is the only vendor evidence this app has: `Build.SOC_MANUFACTURER` names the
+ * SoC, not the GPU, and there is no framework API for the GPU vendor. Every comparison is made
+ * against the lowercased string, so **every needle must be lowercase too** — a mixed-case literal
+ * here can never match. (One did: `contains("rDNA")`, which made the RDNA half of the AMD branch
+ * unreachable and reported `Unknown` on a renderer that named RDNA and nothing else.)
+ *
+ * `kgsl` is the Qualcomm kernel graphics driver node, which some vendor renderer strings carry
+ * instead of the word `Adreno`; `rogue` is the PowerVR architecture name that older strings use in
+ * place of the brand.
+ */
+internal fun gpuVendorOf(renderer: String?): String? {
+    val lower = renderer?.lowercase() ?: return null
+    return when {
+        lower.contains("adreno") || lower.contains("kgsl") -> "Qualcomm"
+        lower.contains("mali") -> "Arm"
+        lower.contains("powervr") || lower.contains("rogue") -> "Imagination Technologies"
+        lower.contains("xclipse") || lower.contains("rdna") -> "AMD (Samsung Xclipse)"
+        else -> null
     }
 }
