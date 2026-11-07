@@ -135,6 +135,38 @@ class PermissionManagerTest {
     }
 
     @Test
+    fun aCancelledRequestIsNotLeftPending() = runTest {
+        val manager = AndroidPermissionManager(CountingContext(app))
+        manager.attach(activity().get())
+
+        var result: PermissionState? = null
+        val job = launch(Dispatchers.Unconfined) { result = manager.request(AppPermission.CAMERA) }
+        assertEquals(1, manager.pendingRequestCount())
+
+        // Leaving the screen while the dialog is up cancels the caller; the request will never be
+        // read by anyone, so it must not stay in the map for the rest of the process.
+        job.cancel()
+        assertEquals(0, manager.pendingRequestCount())
+
+        // The platform can still deliver the answer afterwards; it must be ignored, not delivered
+        // to a caller that is no longer there.
+        manager.onRequestPermissionsResult(4100, intArrayOf(PackageManager.PERMISSION_GRANTED))
+        assertEquals(0, manager.pendingRequestCount())
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun anAnswerForAnUnknownRequestCodeIsIgnored() {
+        val manager = AndroidPermissionManager(CountingContext(app))
+        manager.attach(activity().get())
+
+        // No request is outstanding, so there is nothing to complete and nothing to throw.
+        manager.onRequestPermissionsResult(4_242, intArrayOf(PackageManager.PERMISSION_GRANTED))
+
+        assertEquals(0, manager.pendingRequestCount())
+    }
+
+    @Test
     fun aGrantedPermissionNeedsOneLookupAndNoActivity() {
         shadowOf(app).grantPermissions(Manifest.permission.CAMERA)
         val context = CountingContext(app)

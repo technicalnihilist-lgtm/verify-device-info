@@ -1073,6 +1073,97 @@ already honours both. With that, `assembleDebug` and `testDebugUnitTest` run nor
 
 ---
 
+## L. Audit findings — 7 November run, sixth pass
+
+The twelve items open above are the same twelve the fifth pass left, and nothing in them changed:
+F1, F3 and I8 are still blocked by this sandbox (2 cores, 2,098 MB — `minifyReleaseWithR8` and
+`lintAnalyzeDebug` do not finish in a 300 s call and neither is resumable), G1 and I10 are still
+duplicates of work already recorded, H2, H5, H7, H9, H11 and H13 still need a visible change, and
+H14 still needs data the app does not carry. So the code was re-read again — error paths that could
+be silent, work that could be lost, state that is written once and never released — and the three
+findings below were added. L1 was implemented in this run.
+
+- [x] **L1. A permission request that is abandoned, or that cannot be raised, is never forgotten —
+  and a failed raise escapes into a screen coroutine that does not catch it.**
+  `AndroidPermissionManager.request` kept `pending: MutableMap<Int, CompletableDeferred<…>>` and a
+  `nextRequestCode` counter, inserted an entry, raised the request and awaited it. Nothing removed
+  that entry except a delivered result, so two reachable paths leaked one per request for the life
+  of the process: the awaiting coroutine being cancelled (the user leaves the microphone, camera or
+  location test screen while the permission dialog is up — the three call sites in `AudioTestScreen`,
+  `CameraTestScreen` and `MiscTestScreen` all launch it from a composition-scoped coroutine, which
+  is cancelled when the screen goes), and `ActivityCompat.requestPermissions` throwing. The second
+  was worse than the leak: the exception escaped into a coroutine that has no `try` around it, so a
+  request that could not be raised surfaced as an unhandled coroutine failure rather than as "not
+  granted". The counter and the map were also mutated outside any lock by a suspend function that
+  can be resumed on any dispatcher, while answers always arrive on the main thread.
+  *Change:* the bookkeeping moved into a new `data/android/PendingPermissionRequests.kt`, a
+  synchronized holder that allocates the code and its deferred (`begin`), completes and forgets an
+  answered code (`complete`, false when nothing is waiting), and drops a code that will never be
+  answered (`abandon`). `request` now abandons its entry on cancellation and rethrows — a cancelled
+  caller has nobody to resume, and inventing an answer would report a decision the user never
+  made — and abandons plus returns `DENIED` when the request cannot be raised, so the caller sees a
+  refusal instead of a crash. `onRequestPermissionsResult` ignores an answer for a code nothing is
+  waiting on instead of returning early on a map lookup. Allocating the code under the same lock
+  also means two racing requests cannot be handed the same code.
+  *Tests:* nine in the new `PendingPermissionRequestsTest` (plain JVM — codes in order and counted,
+  an answer resumes the caller and forgets the code, a refusal arrives as a refusal, an answer for
+  an unknown code is ignored, a code is answered once and the second answer cannot overwrite the
+  first, an abandoned request is forgotten and its deferred deliberately left incomplete,
+  abandoning twice is harmless, two outstanding requests answered out of order stay independent,
+  and 8 threads × 500 concurrent `begin` calls yield 4,000 distinct codes), plus two in
+  `PermissionManagerTest` (Robolectric): a cancelled request leaves nothing pending and the answer
+  the platform delivers afterwards is ignored, and an answer for an unknown code is ignored rather
+  than throwing. **Not verified:** the "request could not be raised" branch is verified by
+  inspection only — Robolectric's `ComponentActivity.requestPermissions` does not throw, so that
+  catch cannot be driven from a test here. `assembleDebug` green with no compiler warnings, all
+  **288** unit tests pass (277 before, 11 new), `tools/check-no-ui-change.sh` clean (31 files tracked
+  under `ui/` and `res/`, none differs) — the diff is one new production file, one modified manager
+  and two test files. Debug APK 9,895,564 bytes; no size claim, since the debug APK is not
+  byte-reproducible on this toolchain (recorded under J1/J2) and no pre-change baseline was rebuilt
+  this run. Nothing on screen changes: no label, value, row, screen or control is touched, and the
+  permission outcome a user sees is the same on every path that already worked.
+- [ ] **L2. The fingerprint coherence check claims to compare three segments and compares one.**
+  `DefaultAuthenticityEngine` derives `fpProduct` and `fpDevice` from `AnalysisSupport.parseFingerprint`
+  and then never uses them: `coherent` is `normalise(fpBrand) == normalise(identity.brand) ||
+  brandsRelated(fpBrand, identity.brand)`. The VERIFIED finding's explanation nevertheless states
+  that "the fingerprint's brand/product/device triple matches the reported brand, product and device
+  properties", and its evidence line prints the product and device it did not check — so a build
+  whose fingerprint names the right brand with a different product and device is reported as
+  coherent with a sentence that says all three matched. *Change:* compare all three segments
+  (normalised, with the same brand-family tolerance), and add a fixture table of fingerprints that
+  agree on brand only. *Needs sign-off before implementing:* on such a device the finding would move
+  from VERIFIED to WARNING, which changes the risk level, the headline and the score — the same kind
+  of reported-value change H1, H12 and K3 took sign-off for, but larger, because it can flip a
+  verdict rather than fill in a value that was previously "Unknown". Not to be done unilaterally.
+- [ ] **L3. `SystemPropertyReader.readProcessDump` waits for `getprop` with no deadline.**
+  `process.waitFor()` is unbounded, and the `BufferedReader` read above it blocks until the process
+  closes stdout, so a `getprop` that stops answering blocks its calling thread for the life of the
+  process — the exact failure `ScanCoordinator` and `StageTimer` name in their own comments ("a
+  `getprop` process that does not exit"), which they bound for the *scan* but not for the process.
+  Each abandoned stage therefore leaks one blocked thread and one live OS process, and every rescan
+  leaks another. *Change:* bound the dump read (a deadline on the read, then `destroyForcibly()` and
+  an empty map so reflection still answers), and keep the parse and the parse-once behaviour
+  identical. *Verify:* a unit test that drives the loader against a process which never exits (a
+  stub `getprop` script or a `sleep` child) and asserts it returns inside the deadline with the
+  process gone, plus the existing `SystemPropertyReaderTest` cases unchanged. Not implemented this
+  run: it needs a worker thread or non-blocking read inside a class that is currently synchronous
+  and dependency-free, which is more than one pass should change at once.
+- [ ] **L4. `AudioProbe.measureMicrophone` does not release the recorder on a `SecurityException`.**
+  The `catch (security: SecurityException)` branch returns `null` without releasing `recorder`, while
+  the generic branch right below it does release and clear it — and the comment above the field says
+  the recorder is held "so the catch below releases the recorder instead of leaving the microphone
+  claimed by an object that only the finalizer will ever free". The security path is the one that
+  can actually leave the microphone claimed: a second attempt then overwrites `recorder` and the
+  first `MediaRecorder` is never released at all. *Change:* route both branches through one cleanup
+  (release, clear, return null). *Verify:* the shared cleanup is exercised by a Robolectric shadow
+  that throws from `setAudioSource`; if that cannot be driven, pin the cleanup as a pure helper the
+  way K2 split the PDF writer's lifecycle out of `PdfDocument`. Same pass: `playBeep`/`stopBeep` are
+  called from nowhere in `app/src/main` (only `playTone`/`stopTone` are), and `playBeep` does not
+  call `stopBeep` first, so a second beep would leak the first `ToneGenerator` — decide between
+  deleting the pair and fixing it, rather than leaving dead code that is wrong if revived.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
