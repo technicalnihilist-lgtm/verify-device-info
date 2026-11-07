@@ -24,6 +24,10 @@ import java.io.FileOutputStream
  */
 class PdfReportGenerator(private val context: Context) : ReportGenerator {
 
+    private companion object {
+        const val REPORT_FILE_NAME = "verify-device-info-report.pdf"
+    }
+
     private val pageWidth = 595
     private val pageHeight = 842
     private val margin = 40f
@@ -34,74 +38,84 @@ class PdfReportGenerator(private val context: Context) : ReportGenerator {
     override suspend fun toPdf(report: DeviceReport): File = withContext(Dispatchers.IO) {
         val document = PdfDocument()
         val writer = PageWriter(document)
+        writePdfFile(
+            file = File(context.cacheDir, REPORT_FILE_NAME),
+            build = { writer.render(report) },
+            finishLastPage = writer::close,
+            writeTo = document::writeTo,
+            closeDocument = document::close
+        )
+    }
 
-        writer.title("Verify Device Info — Device Report")
-        writer.small(
+    /** Draws the whole report into the writer's document, page breaks included. */
+    private fun PageWriter.render(report: DeviceReport) {
+        title("Verify Device Info — Device Report")
+        small(
             "Generated ${Formatters.date(report.generatedAtMillis)} · app version ${report.appVersion}" +
                 (if (report.redacted) " · sensitive identifiers redacted" else "")
         )
         if (report.snapshot.isMock) {
-            writer.warning("MOCK DATA — this report was produced from a development fixture, not a real device.")
+            warning("MOCK DATA — this report was produced from a development fixture, not a real device.")
         }
-        writer.rule()
+        rule()
 
         // ---- Identity ----
-        writer.section("1. Device identification")
-        writer.keyValue("Manufacturer", report.snapshot.identity.manufacturer)
-        writer.keyValue("Brand", report.snapshot.identity.brand)
-        writer.keyValue("Model", report.snapshot.identity.model)
-        report.snapshot.identity.marketingName?.let { writer.keyValue("Marketing name", it) }
-        writer.keyValue("Device codename", report.snapshot.identity.device)
-        writer.keyValue("Product", report.snapshot.identity.product)
-        writer.keyValue("Hardware", report.snapshot.identity.hardware)
-        writer.keyValue("Build fingerprint", report.snapshot.identity.fingerprint)
-        writer.keyValue(
+        section("1. Device identification")
+        keyValue("Manufacturer", report.snapshot.identity.manufacturer)
+        keyValue("Brand", report.snapshot.identity.brand)
+        keyValue("Model", report.snapshot.identity.model)
+        report.snapshot.identity.marketingName?.let { keyValue("Marketing name", it) }
+        keyValue("Device codename", report.snapshot.identity.device)
+        keyValue("Product", report.snapshot.identity.product)
+        keyValue("Hardware", report.snapshot.identity.hardware)
+        keyValue("Build fingerprint", report.snapshot.identity.fingerprint)
+        keyValue(
             "SoC",
             listOfNotNull(
                 report.snapshot.identity.socManufacturer,
                 report.snapshot.identity.socModel
             ).joinToString(" ").ifBlank { "Not exposed" }
         )
-        writer.keyValue(
+        keyValue(
             "Serial number",
             if (report.redacted) "Redacted" else report.snapshot.identity.serial ?: "Not accessible"
         )
 
         // ---- OS ----
-        writer.section("2. Operating system")
-        writer.keyValue("Android version", report.snapshot.software.androidRelease)
-        writer.keyValue("API level", report.snapshot.software.apiLevel.toString())
-        writer.keyValue("Security patch", report.snapshot.software.securityPatch ?: "Unknown")
-        writer.keyValue("Kernel", report.snapshot.software.kernelVersion ?: "Unknown")
-        writer.keyValue("Build type / tags",
+        section("2. Operating system")
+        keyValue("Android version", report.snapshot.software.androidRelease)
+        keyValue("API level", report.snapshot.software.apiLevel.toString())
+        keyValue("Security patch", report.snapshot.software.securityPatch ?: "Unknown")
+        keyValue("Kernel", report.snapshot.software.kernelVersion ?: "Unknown")
+        keyValue("Build type / tags",
             "${report.snapshot.identity.buildType} / ${report.snapshot.identity.buildTags}")
-        writer.keyValue("Uptime", Formatters.uptime(report.snapshot.software.uptimeMillis))
+        keyValue("Uptime", Formatters.uptime(report.snapshot.software.uptimeMillis))
 
         // ---- Specs ----
-        writer.section("3. Specifications (A–Z)")
+        section("3. Specifications (A–Z)")
         report.snapshot.fields
             .alphabeticalByLabel()
             .forEach { field ->
                 val value = if (report.redacted && field.sensitive) "Redacted" else field.value
-                writer.keyValue(field.label, "$value  [${field.status.name}, ${field.confidence.name} confidence]")
+                keyValue(field.label, "$value  [${field.status.name}, ${field.confidence.name} confidence]")
             }
 
         // ---- Authenticity ----
-        writer.section("4. Authenticity analysis")
-        writer.body(report.authenticity.headline)
-        writer.keyValue("Risk level", report.authenticity.riskLevel.name)
-        writer.keyValue("Reference data", report.authenticity.referenceSourceSummary)
+        section("4. Authenticity analysis")
+        body(report.authenticity.headline)
+        keyValue("Risk level", report.authenticity.riskLevel.name)
+        keyValue("Reference data", report.authenticity.referenceSourceSummary)
         report.authenticity.findings.forEach { finding ->
-            writer.finding(finding.title, finding.status, finding.explanation)
+            finding(finding.title, finding.status, finding.explanation)
             finding.evidence.forEach { evidence ->
-                writer.small("• ${evidence.description} (${evidence.source.name})")
+                small("• ${evidence.description} (${evidence.source.name})")
             }
         }
 
         // ---- Parts ----
-        writer.section("5. Parts and repair analysis")
+        section("5. Parts and repair analysis")
         report.parts.components.forEach { component ->
-            writer.finding(
+            finding(
                 "${component.component} — ${component.state.name.replace('_', ' ')}",
                 when (component.state) {
                     ComponentState.ORIGINALITY_VERIFIED -> DiagnosticStatus.VERIFIED
@@ -113,36 +127,36 @@ class PdfReportGenerator(private val context: Context) : ReportGenerator {
                 component.explanation
             )
         }
-        writer.small("Limitations:")
-        report.parts.limitations.forEach { writer.small("• $it") }
+        small("Limitations:")
+        report.parts.limitations.forEach { small("• $it") }
 
         // ---- Age ----
-        writer.section("6. Device age")
-        writer.keyValue("Model launch date", report.age.modelLaunchDate ?: "Unknown")
-        writer.keyValue("Model age", Formatters.duration(report.age.modelLaunchAgeDays))
-        writer.keyValue("Firmware build date", report.age.firmwareBuildDate ?: "Unknown")
-        writer.keyValue("Firmware age", Formatters.duration(report.age.firmwareBuildAgeDays))
-        writer.keyValue("Ownership age", Formatters.duration(report.age.ownershipAgeDays))
-        writer.keyValue("Estimated usage age", Formatters.duration(report.age.estimatedUsageAgeDays))
-        writer.keyValue("Security patch age", Formatters.duration(report.age.daysSinceSecurityPatch))
-        report.age.notes.forEach { writer.small("• $it") }
+        section("6. Device age")
+        keyValue("Model launch date", report.age.modelLaunchDate ?: "Unknown")
+        keyValue("Model age", Formatters.duration(report.age.modelLaunchAgeDays))
+        keyValue("Firmware build date", report.age.firmwareBuildDate ?: "Unknown")
+        keyValue("Firmware age", Formatters.duration(report.age.firmwareBuildAgeDays))
+        keyValue("Ownership age", Formatters.duration(report.age.ownershipAgeDays))
+        keyValue("Estimated usage age", Formatters.duration(report.age.estimatedUsageAgeDays))
+        keyValue("Security patch age", Formatters.duration(report.age.daysSinceSecurityPatch))
+        report.age.notes.forEach { small("• $it") }
 
         // ---- Integrity ----
-        writer.section("7. System integrity")
-        writer.body(report.integrity.summary)
+        section("7. System integrity")
+        body(report.integrity.summary)
         report.integrity.checks.forEach { check ->
-            writer.finding(check.title, check.status, check.explanation)
+            finding(check.title, check.status, check.explanation)
         }
 
         // ---- Scores ----
-        writer.section("8. Health scores")
+        section("8. Health scores")
         report.scores.scores.forEach { score ->
             val value = if (score.score == null) {
                 "Not scored (${score.coveragePercent}% coverage)"
             } else {
                 "${score.score}/100 ${score.band.name} (${score.coveragePercent}% coverage)"
             }
-            writer.finding(
+            finding(
                 score.name,
                 when (score.band) {
                     ScoreBand.GOOD -> DiagnosticStatus.PASS
@@ -152,16 +166,16 @@ class PdfReportGenerator(private val context: Context) : ReportGenerator {
                 },
                 "$value — ${score.summary}"
             )
-            score.inputs.forEach { writer.small("• ${it.label}: ${it.value} (weight ${it.weight})") }
+            score.inputs.forEach { small("• ${it.label}: ${it.value} (weight ${it.weight})") }
         }
 
         // ---- Diagnostics ----
-        writer.section("9. Diagnostic tests")
+        section("9. Diagnostic tests")
         if (report.session.results.isEmpty()) {
-            writer.body("No interactive tests were run for this scan.")
+            body("No interactive tests were run for this scan.")
         } else {
             report.session.results.forEach { result ->
-                writer.finding(
+                finding(
                     result.title,
                     result.status,
                     listOfNotNull(result.measured, result.note).joinToString(" — ").ifBlank { "Recorded" }
@@ -170,28 +184,23 @@ class PdfReportGenerator(private val context: Context) : ReportGenerator {
         }
 
         // ---- Unknowns ----
-        writer.section("10. What could not be verified")
+        section("10. What could not be verified")
         val unknowns = report.snapshot.fields.filter {
             it.status == DiagnosticStatus.NOT_SUPPORTED ||
                 it.status == DiagnosticStatus.UNVERIFIED ||
                 it.status == DiagnosticStatus.PERMISSION_REQUIRED
         }
         if (unknowns.isEmpty()) {
-            writer.body("Every field in this report was readable.")
+            body("Every field in this report was readable.")
         } else {
-            unknowns.forEach { writer.small("• ${it.label}: ${it.note ?: it.status.name}") }
+            unknowns.forEach { small("• ${it.label}: ${it.note ?: it.status.name}") }
         }
 
-        writer.footer(
+        footer(
             "This report reflects what the device reported about itself at " +
                 "${Formatters.date(report.generatedAtMillis)}. Software cannot prove that physical " +
                 "components are genuine, and unavailable data is not evidence of tampering."
         )
-
-        val file = File(context.cacheDir, "verify-device-info-report.pdf")
-        FileOutputStream(file).use { document.writeTo(it) }
-        document.close()
-        file
     }
 
     /** Minimal paginated text layout with automatic page breaks. */
@@ -367,6 +376,39 @@ class PdfReportGenerator(private val context: Context) : ReportGenerator {
             if (current.isNotEmpty()) lines += current.toString()
             return lines
         }
+    }
+}
+
+/**
+ * The file lifecycle of one PDF export, separated from the drawing so it can be tested without a
+ * device.
+ *
+ * `PdfDocument` refuses to write while a page is still current, and the layout only finishes the
+ * pages it breaks away from, so the page still open at the end has to be finished by
+ * [finishLastPage] *before* [writeTo] runs. The document is closed on every path — a failed build
+ * leaves a page open, which makes `close()` itself refuse, so the page is finished first and any
+ * cleanup failure is swallowed rather than allowed to replace the exception already in flight. A
+ * file that could not be completed is deleted, because a truncated report would otherwise be
+ * shared as if it were whole.
+ */
+internal inline fun writePdfFile(
+    file: File,
+    build: () -> Unit,
+    finishLastPage: () -> Unit,
+    writeTo: (java.io.OutputStream) -> Unit,
+    closeDocument: () -> Unit
+): File {
+    try {
+        build()
+        finishLastPage()
+        FileOutputStream(file).use(writeTo)
+        return file
+    } catch (t: Throwable) {
+        file.delete()
+        throw t
+    } finally {
+        runCatching { finishLastPage() }
+        runCatching { closeDocument() }
     }
 }
 

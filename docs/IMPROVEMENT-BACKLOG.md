@@ -972,16 +972,36 @@ findings below were added. K1 was implemented in this run.
   `FileDiagnosticHistory.kt` plus the new test. Debug APK 9,827,992 bytes; no size claim, because the
   debug APK is not byte-reproducible on this toolchain (recorded under J1/J2) and no baseline was
   rebuilt this run.
-- [ ] **K2. `PdfReportGenerator.toPdf` never finishes its last page and never closes the document on
-  the error path.** `PageWriter.close()` — the only caller of `finishPage` for the final page — is
-  dead code: nothing calls it, so the last page is left open when `document.writeTo(…)` runs.
-  `PdfDocument` refuses to write or close while a page is current (`throwIfCurrentPageNotFinished`),
-  and `document.close()` is not in a `finally`, so any exception between `PdfDocument()` and the end
-  leaks the native document and leaves a half-written `verify-device-info-report.pdf` in the cache.
-  *Change:* call `writer.close()` before `writeTo`, wrap the body in `try`/`finally { document.close() }`,
-  and delete the partial file when the write fails. *Test:* a Robolectric test that exports a fixture
-  report and asserts the file exists and is a PDF, plus one that a throwing write leaves no file.
-  Worth doing first thing in the next run that has a warm build.
+- [x] **K2. `PdfReportGenerator.toPdf` never finishes its last page and never closes the document on
+  the error path.** `PageWriter.close()` — the only caller of `finishPage` for the final page — was
+  dead code: nothing called it, so the last page was left open when `document.writeTo(…)` ran.
+  `PdfDocument` refuses to write or close while a page is current
+  (`throwIfCurrentPageNotFinished`), and `document.close()` was not in a `finally`, so any exception
+  between `PdfDocument()` and the end leaked the native document and left a half-written
+  `verify-device-info-report.pdf` in the cache.
+  *Change:* the drawing moved into `PageWriter.render(report)` and the file lifecycle into
+  `writePdfFile(file, build, finishLastPage, writeTo, closeDocument)`, which finishes the last page
+  **before** `writeTo`, writes through a `use`, closes the document on every path in a `finally` —
+  finishing a page a failed build left open first, because `close()` refuses otherwise — and deletes
+  the target file when the export fails, so a truncated report cannot be shared as a whole one.
+  Cleanup failures are swallowed so they cannot replace the exception already in flight. The cache
+  file name moved to a companion constant. The effect is not cosmetic: before this, every export
+  threw `IllegalStateException: Current page not finished` at `writeTo` and no PDF was ever
+  produced — the Report screen's "Export PDF" only ever showed its failure message.
+  *Tests:* seven in `PdfWriteLifecycleTest`, a plain JVM test: the last page is finished before
+  `writeTo`; a completed export returns the file it wrote and the bytes it wrote; the document is
+  closed exactly once and last on the success path; a throwing build still closes the document and
+  rethrows the original failure; a throwing build leaves no file behind; a throwing write leaves no
+  partial file; and a cleanup failure cannot replace the failure being reported. Robolectric cannot
+  stand in for `PdfDocument` — its native handle is always 0, so the first `startPage` throws
+  "document is closed!" — which is why the drawing and the lifecycle are separated and only the
+  lifecycle is driven here. **Not verified on a device:** the real `PdfDocument` round trip is
+  exactly what the fix restores and nothing in this sandbox can run it, so what is pinned is the
+  ordering and the cleanup the document depends on.
+  `assembleDebug` green, all **271** unit tests pass (264 before, 7 new). Debug APK 9,893,794 bytes
+  against 9,827,992 for this run's pre-change build — a 64 KB gap for one small helper, the same
+  non-reproducibility recorded under J1/J2, so no size claim. No UI, copy or layout change: the
+  whole diff is `PdfReportGenerator.kt` plus the new test.
 - [ ] **K3. `HardwareCollector.guessGpuVendor` compares a lowercased string with a mixed-case
   literal.** `lower.contains("rDNA")` can never be true, because `lower` came from
   `renderer.lowercase()`: the RDNA half of the `"AMD (Samsung Xclipse)"` branch is dead. *Change:*
@@ -989,6 +1009,14 @@ findings below were added. K1 was implemented in this run.
   This changes one rendered value — the "GPU vendor" row reads `Unknown` today on a renderer string
   that only names RDNA — so it needs the same sign-off H1/H12 took; it is data, not copy, and only a
   device that reports nothing today reports something after.
+
+Second pass, 7 November: the twelve items above are unchanged — F1, F3 and I8 are still blocked by
+this sandbox (2 cores, 2,098 MB: `minifyReleaseWithR8` and `lintAnalyzeDebug` do not finish in a
+300 s call and neither is resumable), G1 and I10 are still duplicates of recorded work, H2, H5, H7,
+H9, H11 and H13 still need a visible change, H14 still needs data the app does not carry, and K3
+still needs the sign-off H1/H12 took. K2 was implemented in this run. Note for future runs: on this
+host `compileDebugKotlin` alone takes ~4.5 min and `compileDebugUnitTestKotlin` ~4 min, so each
+compile needs its own 300 s call; a single `assembleDebug` that spans a source change will not fit.
 
 Environment note for future runs: this sandbox's Maven Central hosts (`repo1.maven.org` and
 `repo.maven.apache.org`) answered **429** with `Retry-After: 86025` during this run, which broke
