@@ -3,7 +3,9 @@ package com.verifydeviceinfo.data.android
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.lang.reflect.Method
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * Reads Android system properties.
@@ -19,6 +21,10 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * [dumpLoader] exists so the parse-once behaviour and the line parser can be unit-tested without
  * a device; production code uses the default, which shells out to `getprop`.
+ *
+ * The dump is read on a worker thread and abandoned at a deadline ([DUMP_DEADLINE_MS]): a `getprop`
+ * that stops answering must not hold the calling thread — and its process — for the life of the app,
+ * which is what an unbounded `readLine()`/`waitFor()` pair does on a rescan.
  */
 class SystemPropertyReader(
     private val dumpLoader: () -> Map<String, String> = { readProcessDump() }
@@ -74,20 +80,71 @@ class SystemPropertyReader(
 
     companion object {
 
+        /**
+         * How long the `getprop` dump may take before the process is killed. A healthy dump is a
+         * read-only query that answers in well under a second; two seconds leaves room for a loaded
+         * device while keeping a wedged `getprop` from blocking a scan.
+         */
+        internal const val DUMP_DEADLINE_MS = 2_000L
+
+        /** Grace given to the reader thread, and to the process, to finish once killed. */
+        private const val DUMP_DRAIN_GRACE_MS = 250L
+
         /** Runs `getprop` once and parses its dump. Returns an empty map if it cannot run. */
-        fun readProcessDump(): Map<String, String> {
-            val process = ProcessBuilder("getprop").redirectErrorStream(true).start()
-            try {
-                BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
-                    return parseDump(generateSequence { reader.readLine() })
-                }
-            } finally {
-                try {
-                    process.waitFor()
-                } catch (ignored: Throwable) {
-                }
-                process.destroy()
+        fun readProcessDump(): Map<String, String> = readProcessDump(listOf("getprop"), DUMP_DEADLINE_MS)
+
+        /**
+         * Runs [command] and parses its stdout as a property dump, giving up after [deadlineMillis].
+         *
+         * The read happens on a worker thread because `readLine()` blocks until the process closes
+         * stdout: without the deadline a `getprop` that hangs blocks this thread, and the process
+         * with it, forever. At the deadline the process is killed forcibly and whatever was parsed
+         * before the cut is returned — a property after the cut is simply absent, and [get] then
+         * falls back to reflection for it, exactly as for a key the dump does not publish.
+         */
+        internal fun readProcessDump(command: List<String>, deadlineMillis: Long): Map<String, String> {
+            val process = try {
+                ProcessBuilder(command).redirectErrorStream(true).start()
+            } catch (ignored: Throwable) {
+                return emptyMap()
             }
+
+            val lines = Collections.synchronizedList(ArrayList<String>(1024))
+            val reader = Thread({
+                try {
+                    BufferedReader(InputStreamReader(process.inputStream)).use { input ->
+                        while (true) {
+                            lines.add(input.readLine() ?: break)
+                        }
+                    }
+                } catch (ignored: Throwable) {
+                    // Killed at the deadline, or the pipe broke: keep the lines already read.
+                }
+            }, "getprop-dump")
+            reader.isDaemon = true
+
+            try {
+                reader.start()
+                reader.join(deadlineMillis)
+                if (reader.isAlive) {
+                    process.destroyForcibly()
+                    reader.join(DUMP_DRAIN_GRACE_MS)
+                }
+            } catch (ignored: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } finally {
+                // Bounded reap: waitFor() alone is the unbounded wait this method exists to avoid.
+                try {
+                    if (!process.waitFor(DUMP_DRAIN_GRACE_MS, TimeUnit.MILLISECONDS)) {
+                        process.destroyForcibly()
+                    }
+                } catch (ignored: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+
+            val dump = synchronized(lines) { ArrayList(lines) }
+            return parseDump(dump.asSequence())
         }
 
         /**

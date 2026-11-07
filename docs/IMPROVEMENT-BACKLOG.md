@@ -457,6 +457,9 @@ build and tests green before committing.
   which R8 was already attempted twice today and where a killed call still discards all of its work.
   This run's cold `assembleDebug` needed five 300 s calls, so there is no window for a
   non-resumable `minifyReleaseWithR8`.
+  *Passed over (8 Nov run):* unchanged — `nproc` = 2, 2,098 MB. This run's cold build again took
+  several 300 s calls, and `minifyReleaseWithR8` still cannot finish inside one call or resume
+  across calls, so no minified APK exists to measure.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -497,6 +500,8 @@ build and tests green before committing.
   still does not fit in a 300 s call, so nothing could be triaged honestly.
   *Passed over (7 Nov, third pass):* unchanged — same 2 cores / 2,098 MB, and this run's cold
   `assembleDebug` took five 300 s calls on its own, so the analysis cannot be finished or triaged.
+  *Passed over (8 Nov run):* unchanged — 2 cores, and a single non-resumable `lintAnalyzeDebug`
+  still does not fit in a 300 s call, so nothing could be triaged honestly.
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -537,6 +542,8 @@ build and tests green before committing.
   already-covered backlog items — so there is still no number without a home in this file.
   *Passed over (7 Nov run):* this run's finding (an interrupted keystore probe poisoning every
   later one) is recorded in full in J1's own entry, so a second copy still would not pay for itself.
+  *Passed over (8 Nov run):* this run's measurement (the `getprop` deadline, L3) is recorded in
+  L3's own entry, so the duplication argument still holds.
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
   makes no new claim, and `LIMITATIONS.md` already covers reference-data coverage and per-API
@@ -578,6 +585,8 @@ would be worse than one honest one.
   UI freeze forbids, and the vendor table is still data the app does not carry.
   *Skipped (7 Nov run):* unchanged — a new authenticity finding is a new card, which the UI freeze
   forbids, and the vendor table is still data the app does not carry.
+  *Passed over (8 Nov run):* unchanged — a new authenticity finding is a new card, which the UI
+  freeze forbids, and the vendor table is still data the app does not carry.
 - [x] **H3. Battery health code 0 means unknown, not good.** `BATTERY_HEALTH_UNKNOWN` is currently
   scored like a healthy pack; treat it as missing evidence. *Done:* in `DefaultPartsProvider` the
   battery branch tested `healthCode != 2 && healthCode > 0`, which sent code 1 (`BATTERY_HEALTH_UNKNOWN`)
@@ -620,6 +629,8 @@ would be worse than one honest one.
   camera screen.
   *Passed over (7 Nov run):* unchanged — "expose the other value" is a second value on the camera
   screen.
+  *Passed over (8 Nov run):* unchanged — "expose the other value" is a second value on the
+  camera screen.
 - [x] **H6. Replace deprecated `getRealMetrics`.** Use `WindowMetrics` on API 30+ with the old path as
   fallback; behaviour must stay identical on every API level. *Done:* `HardwareCollector.readDisplay`
   no longer calls `Display.getRealMetrics` above API 29. A new private
@@ -648,6 +659,8 @@ would be worse than one honest one.
   *Passed over (6 Nov, fourth pass):* unchanged — still a new row, and still no live VPN to observe.
   *Passed over (7 Nov run):* unchanged — a new row in the connectivity list, and still no live VPN
   to observe.
+  *Passed over (8 Nov run):* unchanged — a new row in the connectivity list, and still no live
+  VPN to observe.
 - [x] **H8. Count packages once.** `getInstalledPackages` is called and walked twice in places; derive
   system and user counts from a single pass. *Already done:* `getInstalledPackages(0)` is called once
   in `main`, in `SoftwareCollector.collect`, and the single pass over that list increments both the
@@ -662,6 +675,9 @@ would be worse than one honest one.
   publish `ro.boot.verifiedbootstate`, and "say which property answered" is copy.
   *Passed over (7 Nov run):* unchanged — "say which property answered" is copy, and the fallback
   alone changes nothing on a device that publishes `ro.boot.verifiedbootstate`.
+  *Passed over (8 Nov run):* unchanged — "say which property answered" rewrites the security
+  screen's source line and copy, and the fallback alone changes nothing on a device that publishes
+  `ro.boot.verifiedbootstate`.
 - [x] **H10. Locale audit.** Every `String.format` must pass `Locale.US`; a device set to Arabic or
   Hindi digits currently renders numbers inconsistently in the report. *Already done:* every
   `String.format` in `main` passes `Locale.US` explicitly — all 35 sites, no exceptions.
@@ -675,6 +691,7 @@ would be worse than one honest one.
   in the storage group — a visible change. The copy-free half would be reporting only the primary
   volume, which is exactly what it already does.
   *Passed over (7 Nov run):* unchanged — a second volume means new rows in the storage group.
+  *Passed over (8 Nov run):* unchanged — a second volume means new rows in the storage group.
 - [x] **H12. Per-core CPU frequencies.** Read max frequency for every core, not just `cpu0`, and report
   the cluster layout when it is readable. *Done (frequency half; cluster layout dropped):* `cpu0` is a
   LITTLE core on every ARM big.LITTLE/DynamIQ part, so the old `cpu0/cpufreq/cpuinfo_max_freq` lookup
@@ -703,6 +720,7 @@ would be worse than one honest one.
   overview and in the report — a visible change. The copy-free part, renaming the misleading internal
   `uptimeMillis` field, is a rename with no behaviour to test.
   *Passed over (7 Nov run):* unchanged — a second uptime value is a second row.
+  *Passed over (8 Nov run):* unchanged — a second uptime value is a second row on the overview.
 - [ ] **H14. Reference codenames.** Add codename patterns to the reference entries so matching works
   for builds whose `Build.MODEL` is a carrier variant.
   *Skipped (6 Nov, fifth pass):* the mechanism is already there — `ReferenceIndex.match` takes the
@@ -715,6 +733,9 @@ would be worse than one honest one.
   the recorded source", or add a source for codenames first.
   *Skipped (7 Nov run):* unchanged — this is missing data, not missing code, and the codenames are
   still not on the recorded `sourceUrl` pages.
+
+  *Passed over (8 Nov run):* unchanged — missing data, not missing code; the codenames are still
+  not on the recorded `sourceUrl` pages.
 
 ## I. Tooling and tests that protect the work
 
@@ -801,6 +822,7 @@ would be worse than one honest one.
 - [ ] **I8. Lint triage.** Run `gradle lint`, fix real findings, suppress the rest with a written reason.
   *Passed over (7 Nov run):* unchanged — same constraint as F3: `lintAnalyzeDebug` does not finish
   in one 300 s call on 2 cores.
+  *Passed over (8 Nov run):* unchanged — same constraint as F3.
 - [x] **I9. Screenshot non-blank assertion.** Fail the render test if an image comes back uniform.
   *Already done:* `ScreenshotTest` measures every capture (distinct colours and ink fraction) and
   fails with the measured numbers when a screen comes back blank, and `aBlankFrameIsRejected` renders
@@ -812,6 +834,9 @@ would be worse than one honest one.
   *Passed over (7 Nov run):* F5 already resolved and audited the release classpath (149 modules,
   every top-level entry mapped to a declared dependency), so a second recorded tree would only
   duplicate it. Re-scope as per-artefact byte sizes if that is what is wanted.
+
+  *Passed over (8 Nov run):* unchanged — F5 already resolved and audited the release classpath
+  (149 modules), so a second recorded tree would only duplicate it.
 
 ## J. Audit findings — 7 November run
 
@@ -1135,7 +1160,9 @@ findings below were added. L1 was implemented in this run.
   from VERIFIED to WARNING, which changes the risk level, the headline and the score — the same kind
   of reported-value change H1, H12 and K3 took sign-off for, but larger, because it can flip a
   verdict rather than fill in a value that was previously "Unknown". Not to be done unilaterally.
-- [ ] **L3. `SystemPropertyReader.readProcessDump` waits for `getprop` with no deadline.**
+  *Passed over (8 Nov run):* unchanged — still needs sign-off: on a brand-only match the finding
+  flips from VERIFIED to WARNING and the score moves with it.
+- [x] **L3. `SystemPropertyReader.readProcessDump` waits for `getprop` with no deadline.**
   `process.waitFor()` is unbounded, and the `BufferedReader` read above it blocks until the process
   closes stdout, so a `getprop` that stops answering blocks its calling thread for the life of the
   process — the exact failure `ScanCoordinator` and `StageTimer` name in their own comments ("a
@@ -1148,6 +1175,32 @@ findings below were added. L1 was implemented in this run.
   process gone, plus the existing `SystemPropertyReaderTest` cases unchanged. Not implemented this
   run: it needs a worker thread or non-blocking read inside a class that is currently synchronous
   and dependency-free, which is more than one pass should change at once.
+  *Done (8 Nov run):* `readProcessDump` reads the dump on a daemon worker thread and joins it for
+  `DUMP_DEADLINE_MS` (2 s); at the deadline it calls `destroyForcibly()` and drains for 250 ms, and the
+  `finally` now does a bounded `waitFor(250 ms, MILLISECONDS)` with a second `destroyForcibly()` instead
+  of the unbounded `waitFor()` that was the second half of the leak. Lines read before the cut are kept
+  and parsed exactly as before, so a property after the cut is simply absent and `get()` falls back to
+  reflection for it — the same path as a key the dump never publishes. `parseDump`, the parse-once flag
+  and the reflection fallback are untouched, and a `ProcessBuilder.start()` failure now returns an empty
+  map instead of propagating (the KDoc always claimed that; only `loadDump`'s catch hid it). The command
+  and deadline are parameters of an internal overload, so the process path can be driven without a
+  device; the no-argument `readProcessDump()` signature is unchanged. *Measured:* before, a `sh` stub
+  that writes one line and then `exec sleep 30` held the calling thread for the stub's full 30.0 s and
+  left the process running; after, with a 400 ms deadline the same stub returns in **0.41 s** with the
+  process gone (0.413 s for the whole test including spawning `sh`; a silent stub returns in 0.400 s at
+  a 300 ms deadline; a healthy three-line dump parses in 0.017 s). Six tests in
+  `SystemPropertyReaderDeadlineTest` drive real processes: cut at the deadline with the pre-cut line
+  kept, a silent process yielding an empty map, the killed pid gone when the call returns (observed
+  through `/proc`, `assumeTrue` on non-Linux hosts), a command that cannot start, a dump that finishes
+  inside the deadline keeping every line, and the default deadline asserted finite and sane. All seven
+  existing `SystemPropertyReaderTest` cases pass unchanged. `assembleDebug` green with 0 compiler
+  warnings; all **294** unit tests pass (288 before, 6 new); APK 9,827,992 bytes, no size claim since
+  the debug APK is not byte-reproducible on this toolchain. No `ui/` or `res/` file touched — no screen,
+  control, style, layout, copy or reported value changes: on a device whose `getprop` answers normally
+  nothing differs, and on one whose `getprop` hangs the scan now loses that dump (reflection still
+  answers per key) instead of leaking a blocked thread and a live process on every rescan. Trade-off
+  recorded: 2 s is generous for a read-only dump that answers in well under a second on a healthy
+  device, and the deadline is a constant, not a per-device guess.
 - [ ] **L4. `AudioProbe.measureMicrophone` does not release the recorder on a `SecurityException`.**
   The `catch (security: SecurityException)` branch returns `null` without releasing `recorder`, while
   the generic branch right below it does release and clear it — and the comment above the field says
