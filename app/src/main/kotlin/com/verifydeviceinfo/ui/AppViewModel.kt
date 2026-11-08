@@ -184,9 +184,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val report = _state.value.report ?: return
         viewModelScope.launch {
             try {
-                val text = container.reportGenerator.toJson(report.copy(redacted = _state.value.redacted))
-                val file = File(getApplication<Application>().cacheDir, "verify-device-info-report.json")
-                file.writeText(text)
+                val file = container.reportGenerator.toJsonFile(
+                    report.copy(redacted = _state.value.redacted),
+                    File(getApplication<Application>().cacheDir, "verify-device-info-report.json")
+                )
                 _state.value = _state.value.copy(exportFile = file, message = "JSON ready to share.")
             } catch (e: Exception) {
                 _state.value = _state.value.copy(error = "JSON export failed: ${e.message}")

@@ -65,6 +65,15 @@ interface HardwareDiagnosticsEngine {
 
 interface ReportGenerator {
     suspend fun toJson(report: DeviceReport): String
+
+    /**
+     * Encodes [report] and writes it to [file], returning [file].
+     *
+     * Encoding happens off the calling thread and the write is atomic, so a caller on the main
+     * thread does no file I/O and an interrupted export never leaves a truncated file behind.
+     */
+    suspend fun toJsonFile(report: DeviceReport, file: File): File
+
     suspend fun toPdf(report: DeviceReport): File
 }
 

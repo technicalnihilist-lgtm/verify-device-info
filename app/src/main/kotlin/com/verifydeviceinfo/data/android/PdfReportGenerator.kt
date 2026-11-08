@@ -35,6 +35,12 @@ class PdfReportGenerator(private val context: Context) : ReportGenerator {
     override suspend fun toJson(report: DeviceReport): String =
         withContext(Dispatchers.Default) { ReportJson.encode(report, redacted = report.redacted) }
 
+    override suspend fun toJsonFile(report: DeviceReport, file: File): File {
+        val text = toJson(report)
+        withContext(Dispatchers.IO) { atomicWriteText(file, text) }
+        return file
+    }
+
     override suspend fun toPdf(report: DeviceReport): File = withContext(Dispatchers.IO) {
         val document = PdfDocument()
         val writer = PageWriter(document)

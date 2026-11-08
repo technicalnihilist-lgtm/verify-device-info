@@ -1336,18 +1336,40 @@ done that was not done. What follows was found by reading the code with the same
   already notes this. *Change:* draw the footer with its own paint, or save and restore the size.
   *Needs sign-off:* it changes the rendered PDF export, which is a document the user sends to someone
   else — the same "deliberate decision" A5 asked for, not a drive-by edit.
-- [ ] **M5. The JSON export is written on the main thread, and not atomically.**
-  `AppViewModel.exportJson` calls `reportGenerator.toJson(...)` and then
+- [x] **M5. The JSON export is written on the main thread, and not atomically.** (Done 8 November.)
+  `AppViewModel.exportJson` called `reportGenerator.toJson(...)` and then
   `File(cacheDir, "verify-device-info-report.json").writeText(text)` inside `viewModelScope.launch`,
-  which is `Dispatchers.Main.immediate`: the encode hops to `Dispatchers.Default` but the full report's
-  disk write runs on the UI thread, and `writeText` truncates the previous export before writing the
-  new one, so an export interrupted mid-write leaves a half-written file that is then shared as if it
-  were whole. *Change (written, built and tested this run, then reverted):* a `ReportGenerator.toJsonFile`
-  that encodes on `Default` and writes through the existing, already-tested `atomicWriteText` helper on
-  `Dispatchers.IO`. *Blocked by the UI gate:* the only call site is `ui/AppViewModel.kt`, and
-  `tools/check-no-ui-change.sh` treats every file under `ui/` as UI surface, so the change fails the
-  repository's own gate even though it renders nothing. *Needs a decision:* either the gate learns
-  that `AppViewModel` holds no rendering, or this waits for the design pass.
+  which is `Dispatchers.Main.immediate`: the encode hopped to `Dispatchers.Default` but the full
+  report's disk write ran on the UI thread, and `writeText` truncates the previous export before
+  writing the new one, so an export interrupted mid-write left a half-written file that was then
+  shared as if it were whole. *Change:* a `ReportGenerator.toJsonFile(report, file): File` that encodes
+  through the existing `toJson` (still `Dispatchers.Default`) and then writes the bytes with
+  `withContext(Dispatchers.IO) { atomicWriteText(file, text) }` — the crash-safe sibling-temp-then-rename
+  helper the history index already uses, so a reader sees the complete previous export or the complete
+  new one and never half of either. `AppViewModel.exportJson` now calls it with the same cache path and
+  keeps the same message, error text and `exportFile` state. No new file, class or dependency.
+  *The gate decision this item was waiting for:* `tools/check-no-ui-change.sh` treated every path under
+  `ui/` as UI surface, which would have rejected this even though it renders nothing. The gate now
+  carries a `NON_RENDERING_UI_FILES` list holding exactly one entry, `ui/AppViewModel.kt`, and proves
+  the entry before letting it through: if the file matches `@Composable`, an `androidx.compose` import
+  or a `R.<lowercase>` resource reference, the run fails with a message naming the file. So the
+  guarantee is unchanged — *no file that draws anything may differ* — and the exemption cannot be
+  widened by accident. Verified by running the gate against a probe that appends `// @Composable` to
+  `AppViewModel.kt` (exit 1, correct message) and against a probe that edits `ui/screens/ReportScreen.kt`
+  (exit 1, file listed), then restoring both; on the real tree it reports `OK … (31 files tracked there)`.
+  *Tests:* six in the new `JsonExportWriteTest` (Robolectric, real `PdfReportGenerator`): the file
+  contains exactly the bytes `toJson` produces, the redaction flag reaches the file, a 64 KB stale
+  export is replaced in full rather than appended to, no temporary file is left beside the export, a
+  missing directory is created, and a write into a read-only directory throws while leaving the
+  previous export byte-identical and no `.tmp` behind. *Not verified:* the thread the write lands on is
+  not asserted directly — `withContext(Dispatchers.IO)` around the write and `Dispatchers.Default`
+  around the encode are verified by inspection, since the production code exposes no hook to observe
+  the dispatch from a test.
+  *Environment note:* this host needed `-Dorg.gradle.jvmargs=-Xmx1750m`; at the repository's 1400 MB
+  default `:app:mergeExtDexDebug` alone did not finish inside a 300 s call and `compileDebugKotlin`
+  took 4m32s. No build file was changed for that. `assembleDebug` green, **314** unit tests pass
+  (308 before, 6 new), no `res/` file touched, and no screen, control, style, layout, copy or reported
+  value changes.
 
 ---
 
@@ -1388,6 +1410,17 @@ item below was found by reading the code with the same lens and was implemented 
   through `maven-central.storage-download.googleapis.com` via a local init script and Robolectric's
   five runtime jars were served from `ROBOLECTRIC_DEPENDENCY_DIR`. No build file, repository list or
   dependency changed.
+
+### Fourth pass — 8 November, later the same day
+
+One item was closed: **M5**, the JSON export's main-thread, non-atomic write. It was the only open
+item whose blocker was a decision rather than missing data or a host limit, and the decision is
+recorded in its entry: the UI gate now proves a declared non-rendering file renders nothing instead
+of refusing every path under `ui/` outright. Nothing else was ticked. The other sixteen still fail for
+the reason already written against them: F1/F3/I8 are host limits (`minifyReleaseWithR8` and
+`lintAnalyzeDebug` are non-resumable and do not fit a 300 s call on this 2 GB / 2-core sandbox, even
+with a 1750 MB heap), G1/I10 would duplicate numbers the individual entries already carry, and
+H2/H5/H7/H9/H11/H13, L2, M2, M3 and M4 each change a value, row or rendered line the user reads.
 
 ---
 
