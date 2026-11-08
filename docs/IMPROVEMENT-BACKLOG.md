@@ -460,6 +460,9 @@ build and tests green before committing.
   *Passed over (8 Nov run):* unchanged — `nproc` = 2, 2,098 MB. This run's cold build again took
   several 300 s calls, and `minifyReleaseWithR8` still cannot finish inside one call or resume
   across calls, so no minified APK exists to measure.
+  *Passed over (8 Nov, second pass):* unchanged — `nproc` = 2, 2,098 MB, and this run's cold
+  `assembleDebug` needed six 300 s calls on its own, so the non-resumable `minifyReleaseWithR8`
+  still has nowhere to run.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -502,6 +505,8 @@ build and tests green before committing.
   `assembleDebug` took five 300 s calls on its own, so the analysis cannot be finished or triaged.
   *Passed over (8 Nov run):* unchanged — 2 cores, and a single non-resumable `lintAnalyzeDebug`
   still does not fit in a 300 s call, so nothing could be triaged honestly.
+  *Passed over (8 Nov, second pass):* unchanged — same 2 cores, and this run's cold `assembleDebug`
+  alone took six 300 s calls, so the analysis cannot be finished or triaged.
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -528,6 +533,8 @@ build and tests green before committing.
   still holds; this waits for an item whose measurement has no home in this file.
   *Passed over (6 Nov, second pass):* still duplication — every number it would hold is already next to
   the item that produced it, in this file. Write it once the numbers are stable, at the end of the window.
+  *Passed over (8 Nov, second pass):* unchanged — still duplication; L4's numbers are recorded in its
+  own entry.
   *Passed over (6 Nov, third pass):* unchanged — this run produced a tool (I4), not a measurement, so
   there is still no number without a home in this file.
   *Passed over (6 Nov, fourth pass):* this run's one measurement (core 0's ceiling vs the part's) is
@@ -587,6 +594,7 @@ would be worse than one honest one.
   forbids, and the vendor table is still data the app does not carry.
   *Passed over (8 Nov run):* unchanged — a new authenticity finding is a new card, which the UI
   freeze forbids, and the vendor table is still data the app does not carry.
+  *Passed over (8 Nov, second pass):* unchanged — same reason.
 - [x] **H3. Battery health code 0 means unknown, not good.** `BATTERY_HEALTH_UNKNOWN` is currently
   scored like a healthy pack; treat it as missing evidence. *Done:* in `DefaultPartsProvider` the
   battery branch tested `healthCode != 2 && healthCode > 0`, which sent code 1 (`BATTERY_HEALTH_UNKNOWN`)
@@ -631,6 +639,7 @@ would be worse than one honest one.
   screen.
   *Passed over (8 Nov run):* unchanged — "expose the other value" is a second value on the
   camera screen.
+  *Passed over (8 Nov, second pass):* unchanged — same reason.
 - [x] **H6. Replace deprecated `getRealMetrics`.** Use `WindowMetrics` on API 30+ with the old path as
   fallback; behaviour must stay identical on every API level. *Done:* `HardwareCollector.readDisplay`
   no longer calls `Display.getRealMetrics` above API 29. A new private
@@ -661,6 +670,7 @@ would be worse than one honest one.
   to observe.
   *Passed over (8 Nov run):* unchanged — a new row in the connectivity list, and still no live
   VPN to observe.
+  *Passed over (8 Nov, second pass):* unchanged — same reason.
 - [x] **H8. Count packages once.** `getInstalledPackages` is called and walked twice in places; derive
   system and user counts from a single pass. *Already done:* `getInstalledPackages(0)` is called once
   in `main`, in `SoftwareCollector.collect`, and the single pass over that list increments both the
@@ -678,6 +688,7 @@ would be worse than one honest one.
   *Passed over (8 Nov run):* unchanged — "say which property answered" rewrites the security
   screen's source line and copy, and the fallback alone changes nothing on a device that publishes
   `ro.boot.verifiedbootstate`.
+  *Passed over (8 Nov, second pass):* unchanged — same reason.
 - [x] **H10. Locale audit.** Every `String.format` must pass `Locale.US`; a device set to Arabic or
   Hindi digits currently renders numbers inconsistently in the report. *Already done:* every
   `String.format` in `main` passes `Locale.US` explicitly — all 35 sites, no exceptions.
@@ -692,6 +703,7 @@ would be worse than one honest one.
   volume, which is exactly what it already does.
   *Passed over (7 Nov run):* unchanged — a second volume means new rows in the storage group.
   *Passed over (8 Nov run):* unchanged — a second volume means new rows in the storage group.
+  *Passed over (8 Nov, second pass):* unchanged — same reason.
 - [x] **H12. Per-core CPU frequencies.** Read max frequency for every core, not just `cpu0`, and report
   the cluster layout when it is readable. *Done (frequency half; cluster layout dropped):* `cpu0` is a
   LITTLE core on every ARM big.LITTLE/DynamIQ part, so the old `cpu0/cpufreq/cpuinfo_max_freq` lookup
@@ -721,6 +733,7 @@ would be worse than one honest one.
   `uptimeMillis` field, is a rename with no behaviour to test.
   *Passed over (7 Nov run):* unchanged — a second uptime value is a second row.
   *Passed over (8 Nov run):* unchanged — a second uptime value is a second row on the overview.
+  *Passed over (8 Nov, second pass):* unchanged — same reason.
 - [ ] **H14. Reference codenames.** Add codename patterns to the reference entries so matching works
   for builds whose `Build.MODEL` is a carrier variant.
   *Skipped (6 Nov, fifth pass):* the mechanism is already there — `ReferenceIndex.match` takes the
@@ -731,6 +744,7 @@ would be worse than one honest one.
   adding them from memory would put unsourced identifiers into a set whose whole point is that each
   entry can be checked. Re-scope as "add codenames for the entries whose codename is documented on
   the recorded source", or add a source for codenames first.
+  *Passed over (8 Nov, second pass):* unchanged — still data the app does not carry and cannot source.
   *Skipped (7 Nov run):* unchanged — this is missing data, not missing code, and the codenames are
   still not on the recorded `sourceUrl` pages.
 
@@ -823,6 +837,7 @@ would be worse than one honest one.
   *Passed over (7 Nov run):* unchanged — same constraint as F3: `lintAnalyzeDebug` does not finish
   in one 300 s call on 2 cores.
   *Passed over (8 Nov run):* unchanged — same constraint as F3.
+  *Passed over (8 Nov, second pass):* unchanged — same constraint as F3.
 - [x] **I9. Screenshot non-blank assertion.** Fail the render test if an image comes back uniform.
   *Already done:* `ScreenshotTest` measures every capture (distinct colours and ink fraction) and
   fails with the measured numbers when a screen comes back blank, and `aBlankFrameIsRejected` renders
@@ -837,6 +852,7 @@ would be worse than one honest one.
 
   *Passed over (8 Nov run):* unchanged — F5 already resolved and audited the release classpath
   (149 modules), so a second recorded tree would only duplicate it.
+  *Passed over (8 Nov, second pass):* unchanged — same duplication.
 
 ## J. Audit findings — 7 November run
 
@@ -1162,6 +1178,8 @@ findings below were added. L1 was implemented in this run.
   verdict rather than fill in a value that was previously "Unknown". Not to be done unilaterally.
   *Passed over (8 Nov run):* unchanged — still needs sign-off: on a brand-only match the finding
   flips from VERIFIED to WARNING and the score moves with it.
+  *Passed over (8 Nov, second pass):* unchanged — still needs sign-off, and it is the one open item
+  that would change a reported verdict.
 - [x] **L3. `SystemPropertyReader.readProcessDump` waits for `getprop` with no deadline.**
   `process.waitFor()` is unbounded, and the `BufferedReader` read above it blocks until the process
   closes stdout, so a `getprop` that stops answering blocks its calling thread for the life of the
@@ -1201,7 +1219,7 @@ findings below were added. L1 was implemented in this run.
   answers per key) instead of leaking a blocked thread and a live process on every rescan. Trade-off
   recorded: 2 s is generous for a read-only dump that answers in well under a second on a healthy
   device, and the deadline is a constant, not a per-device guess.
-- [ ] **L4. `AudioProbe.measureMicrophone` does not release the recorder on a `SecurityException`.**
+- [x] **L4. `AudioProbe.measureMicrophone` does not release the recorder on a `SecurityException`.**
   The `catch (security: SecurityException)` branch returns `null` without releasing `recorder`, while
   the generic branch right below it does release and clear it — and the comment above the field says
   the recorder is held "so the catch below releases the recorder instead of leaving the microphone
@@ -1214,6 +1232,35 @@ findings below were added. L1 was implemented in this run.
   called from nowhere in `app/src/main` (only `playTone`/`stopTone` are), and `playBeep` does not
   call `stopBeep` first, so a second beep would leak the first `ToneGenerator` — decide between
   deleting the pair and fixing it, rather than leaving dead code that is wrong if revived.
+  *Done (8 Nov, second pass):* both failure branches now go through one private `releaseRecorder()`
+  — release the field, swallow whatever the release throws, clear it — so a refused `RECORD_AUDIO`
+  permission, which throws `SecurityException` out of `setAudioSource`, gives the microphone back
+  instead of leaving it claimed by a recorder only the finalizer would free; before, the next attempt
+  overwrote `recorder` and orphaned the first `MediaRecorder` entirely. The success path's inline
+  `release()` + `recorder = null` pair and the probe's own `release()` use the same helper, so there
+  is one cleanup, not three. The recorder is now built by a private factory and an internal
+  `measureMicrophone(durationMs, newRecorder)` overload takes it from the caller, which is what makes
+  the failure paths drivable without a device; the public no-argument signature, its defaults and
+  every value it returns are unchanged. The dead pair went too: `playBeep`/`stopBeep` were called
+  from nowhere in `app/src/main` (only `playTone`/`stopTone` are, from `AudioTestScreen`), and
+  `playBeep` did not stop the previous tone first, so reviving it would have leaked the first
+  `ToneGenerator` — deleted with the `toneGenerator` field and its two imports rather than fixing
+  code nothing calls. *Tests:* five in `AudioProbeRecorderReleaseTest` (Robolectric, API 34) drive a
+  `MediaRecorder` subclass that counts its own releases and throws from `setAudioSource` or
+  `prepare`: a refused permission releases exactly once and never starts, a recorder that will not
+  prepare releases, a successful capture returns its peak/average and releases exactly once,
+  `release()` after a failed capture does not release the same recorder a second time, and a second
+  capture does not orphan the first. **Not verified:** the production no-argument overload
+  (`MediaRecorder(context)` on API 31+, the deprecated constructor below) is verified by inspection
+  only — it needs a real recorder — and the fake overrides every method the probe calls, so these
+  tests assert the probe's lifecycle handling, not the platform's. `assembleDebug` green with 0
+  compiler warnings, all **299** unit tests pass (294 before, 5 new), APK 9,827,992 bytes with no
+  size claim, since the debug APK is not byte-reproducible on this toolchain. No `ui/` or `res/` file
+  touched: no screen, control, style, layout, copy or reported value changes — a capture that fails
+  still returns "no measurement", it just stops holding the microphone. *Environment note:* Maven
+  Central answered 429 for `org.robolectric:nativeruntime-dist-compat:1.0.16` throughout this run;
+  it was served from a local file repository through a sandbox-only init script, so no build file,
+  repository list or dependency changed.
 
 ---
 

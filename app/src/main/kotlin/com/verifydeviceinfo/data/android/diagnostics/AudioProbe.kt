@@ -3,10 +3,8 @@ package com.verifydeviceinfo.data.android.diagnostics
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioTrack
 import android.media.MediaRecorder
-import android.media.ToneGenerator
 import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -18,7 +16,6 @@ import kotlin.math.max
 /** Speaker tone generation and microphone level measurement for the interactive tests. */
 class AudioProbe(private val context: Context) {
 
-    private var toneGenerator: ToneGenerator? = null
     private var audioTrack: AudioTrack? = null
     private var recorder: MediaRecorder? = null
 
@@ -69,40 +66,26 @@ class AudioProbe(private val context: Context) {
         audioTrack = null
     }
 
-    /** Plays the platform's built-in DTMF tone as an alternative to the generated sine. */
-    fun playBeep(durationMs: Int = 1000): Boolean = try {
-        val generator = ToneGenerator(AudioManager.STREAM_MUSIC, 80)
-        // Held before startTone so a failure there still releases the generator.
-        toneGenerator = generator
-        generator.startTone(ToneGenerator.TONE_DTMF_5, durationMs)
-        true
-    } catch (e: Exception) {
-        stopBeep()
-        false
-    }
-
-    fun stopBeep() {
-        try {
-            toneGenerator?.release()
-        } catch (ignored: Exception) {
-        }
-        toneGenerator = null
-    }
-
     /**
      * Records a short sample and returns the peak amplitude (0-32767) together with the average.
-     * Requires the microphone permission; callers must handle a SecurityException result.
+     * Requires the microphone permission; a refused or otherwise failed capture returns null.
      */
-    suspend fun measureMicrophone(durationMs: Int = 3000): Pair<Int, Int>? = withContext(Dispatchers.IO) {
+    suspend fun measureMicrophone(durationMs: Int = 3000): Pair<Int, Int>? =
+        measureMicrophone(durationMs) { newRecorder() }
+
+    /**
+     * The recording body, with the recorder supplied by the caller so the failure paths can be
+     * driven without a device. Production always goes through the no-argument overload above.
+     */
+    internal suspend fun measureMicrophone(
+        durationMs: Int,
+        newRecorder: () -> MediaRecorder,
+    ): Pair<Int, Int>? = withContext(Dispatchers.IO) {
         val output = File(context.cacheDir, "mic-probe.3gp")
         try {
-            val mediaRecorder = if (Build.VERSION.SDK_INT >= 31) {
-                MediaRecorder(context)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
-            }
-            // Held from construction: if setAudioSource, prepare or start throws, the catch below
+            val mediaRecorder = newRecorder()
+            // Held from construction: if setAudioSource, prepare or start throws — a refused
+            // microphone permission throws SecurityException from setAudioSource — the catch below
             // releases the recorder instead of leaving the microphone claimed by an object that
             // only the finalizer will ever free.
             recorder = mediaRecorder
@@ -129,31 +112,37 @@ class AudioProbe(private val context: Context) {
                 samples++
             }
             mediaRecorder.stop()
-            mediaRecorder.release()
-            recorder = null
+            releaseRecorder()
             val average = if (samples == 0) 0 else (sum / samples).toInt()
             peak to average
-        } catch (security: SecurityException) {
-            null
         } catch (e: Exception) {
-            try {
-                recorder?.release()
-            } catch (ignored: Exception) {
-            }
-            recorder = null
+            // Every failure — a SecurityException from a refused permission as much as a recorder
+            // that will not start — must give the microphone back through the same cleanup.
+            releaseRecorder()
             null
         } finally {
             output.delete()
         }
     }
 
-    fun release() {
-        stopTone()
-        stopBeep()
+    /** Releases the recorder currently held, if any, and forgets it. */
+    private fun releaseRecorder() {
         try {
             recorder?.release()
         } catch (ignored: Exception) {
         }
         recorder = null
+    }
+
+    private fun newRecorder(): MediaRecorder = if (Build.VERSION.SDK_INT >= 31) {
+        MediaRecorder(context)
+    } else {
+        @Suppress("DEPRECATION")
+        MediaRecorder()
+    }
+
+    fun release() {
+        stopTone()
+        releaseRecorder()
     }
 }
