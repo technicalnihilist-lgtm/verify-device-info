@@ -1424,6 +1424,58 @@ H2/H5/H7/H9/H11/H13, L2, M2, M3 and M4 each change a value, row or rendered line
 
 ---
 
+## O. Audit findings — 8 November run, fifth pass
+
+Every unchecked item above was re-read against the code before this pass started, and each still
+fails for the reason already recorded: F1 stays a host limit and was not retried again
+(`nproc` = 2, `free` = 2,098 MB, and `minifyReleaseWithR8` neither finishes in a 300 s call nor
+resumes across one), F3 and I8 are blocked by the same host for the same reason
+(`lintAnalyzeDebug` is non-resumable), G1 and I10 would duplicate numbers their own entries already
+carry, H2/H5/H7/H9/H11/H13 each need a new row, card or copy on a screen, H14 needs codenames the
+recorded sources do not publish, and L2/M2/M3/M4 each change a value, a percentage or a rendered
+page. Nothing was ticked that was not done. The item below was found by reading the code with the
+same lens and was implemented in this run.
+
+- [x] **O1. The stored report file is the last write on the history path that is not crash-safe.**
+  `FileDiagnosticHistory.save` writes one JSON document per scan to `history/reports/<uuid>.json`
+  and then rewrites the index that points at it. The index has gone through `atomicWriteText` since
+  B2 and the JSON export since M5, but the report itself was still `File(...).writeText(...)`, which
+  truncates the target *before* writing the new bytes: a save interrupted between the two — the
+  process killed while the scan was finishing, storage full, a wedged filesystem — left a truncated
+  document under `history/reports/`. That file is not inert: `HistoryScreen` expands an entry by
+  calling `loadRaw` and renders the raw text, so the user was shown half a report with no indication
+  that it was half a report, in a document whose whole premise is that it does not assert what it
+  cannot support. *Change:* the report goes through the same `atomicWriteText` helper the index
+  already uses — bytes to a sibling `<uuid>.json.tmp`, `flush`, `fd.sync()`, then `rename` — so a
+  reader sees the complete document or no document, and the existing `catch` still degrades a failed
+  write to "this report cannot be re-opened" instead of failing the save. No new helper, file, class
+  or dependency, and nothing about the entry, the index, the prune or the id scheme changed.
+  *Tests:* four in the new `HistoryReportWriteTest` (Robolectric, real `FileDiagnosticHistory` over
+  the real `ReportJson`): the stored file is byte-for-byte `ReportJson.encode(report, redacted =
+  true)`, the stored document parses as a whole JSON object and is what `loadRaw` returns, a save
+  leaves exactly one file in `history/reports/` with no `.tmp` beside it, and a report that cannot
+  be written (read-only `reports/` directory) leaves **no** file at all while the save still returns
+  its entry and the index still lists it. *Not verified:* the crash itself. A process killed between
+  truncate and flush cannot be reproduced in a unit test, so the atomicity is verified through the
+  helper's own tests (`HistoryIndexWriteTest`: complete content on success, previous content intact
+  on failure, no temporary left behind) plus the four assertions above on the call site; the tests
+  pin the guarantees, they do not re-create the crash.
+  *Invisible on a device:* a save that completes changes nothing a user sees — the same entry, the
+  same id, the same bytes in the same file — and the only behavioural difference is on the failure
+  path, where a half-written report used to be shown and now cannot exist. `assembleDebug` green;
+  **318** unit tests pass (314 before, 4 new); APK 9,827,992 bytes
+  (unchanged, as expected for a call-site swap).
+  *Environment note:* this sandbox's pre-seeded `~/.m2` copy of
+  `android-all-instrumented-15-robolectric-12650502-i7.jar` — the runtime Robolectric loads for the
+  default (target SDK 35) test configuration — is truncated to 73,646,080 of its 199,527,464 bytes,
+  which aborts the whole test JVM with `Bitmap F … Unable to find static field mNativePtr` (exit
+  134) as soon as a default-SDK test runs, on the unmodified tree as much as on this change. The
+  complete jar from `maven-central.storage-download.googleapis.com`, served through
+  `ROBOLECTRIC_DEPENDENCY_DIR`, makes the suite green again. No build file, repository list or
+  dependency was changed for it.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

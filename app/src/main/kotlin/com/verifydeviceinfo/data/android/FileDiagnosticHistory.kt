@@ -42,7 +42,15 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
                 reportPath = reportPath
             )
             try {
-                File(reportDir, "$id.json").writeText(ReportJson.encode(report, redacted = true))
+                // Crash-safe, like the index that points at it: the stored report is what the
+                // History screen re-opens, and a `writeText` interrupted half-way (process killed,
+                // storage full) used to leave a truncated document that was then shown as if it
+                // were the whole report. A temporary sibling plus a rename means a reader sees the
+                // complete document or no document at all.
+                atomicWriteText(
+                    File(reportDir, "$id.json"),
+                    ReportJson.encode(report, redacted = true)
+                )
             } catch (ignored: Exception) {
             }
             // `null` here means the stored index could not be understood, which is not the same
