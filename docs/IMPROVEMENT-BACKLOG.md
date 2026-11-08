@@ -463,6 +463,19 @@ build and tests green before committing.
   *Passed over (8 Nov, second pass):* unchanged — `nproc` = 2, 2,098 MB, and this run's cold
   `assembleDebug` needed six 300 s calls on its own, so the non-resumable `minifyReleaseWithR8`
   still has nowhere to run.
+  *Attempted and passed over (8 Nov, third pass):* tried again, with one new lever. Every earlier
+  attempt lost ~100 s of each 300 s call to configuration, because a killed build discards the
+  configuration-cache entry and the next call recomputes it; pre-warming it with a `--dry-run` first
+  makes the next call reuse it (`Reusing configuration cache`) and go straight into R8. Even so
+  `:app:minifyReleaseWithR8` did not finish inside a 288 s call in **three** runs: with
+  `proguard-android-optimize.txt`, again with `-dontoptimize` added to the rules, and once more with
+  a warm configuration cache and every prerequisite UP-TO-DATE. The unminified baseline was rebuilt
+  first and reproduces at exactly **6,570,591 bytes**, so the "before" is confirmed; there is no
+  "after" to report, and `isMinifyEnabled` is back to `false`. The keep rules that were tried are
+  recorded in this entry's history, not in the tree: this app has no `@Serializable` classes, so the
+  only reflective lookups are `android.os.SystemProperties` and
+  `com.android.internal.os.PowerProfile`, both framework classes R8 never renames. This task needs a
+  host where one Gradle invocation can run longer than 300 s, not another retry here.
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -1335,6 +1348,46 @@ done that was not done. What follows was found by reading the code with the same
   `tools/check-no-ui-change.sh` treats every file under `ui/` as UI surface, so the change fails the
   repository's own gate even though it renders nothing. *Needs a decision:* either the gate learns
   that `AppViewModel` holds no rendering, or this waits for the design pass.
+
+---
+
+## N. Audit findings — 8 November run, third pass
+
+The seventeen items open above were re-read against the code and each one still fails for the reason
+already recorded: F1 was re-attempted and still does not fit in a 300 s call (see its entry), F3/I8
+are blocked by the same host for the same reason (`lintAnalyzeDebug` is non-resumable), G1/I10 would
+duplicate numbers the individual entries already carry, H2/H5/H7/H9/H11/H13 each need a new row, card
+or copy on a screen, H14 needs data the app cannot source, and L2/M2/M3/M4/M5 each change a value the
+user reads or need a decision this run must not take alone. Nothing was ticked that was not done. The
+item below was found by reading the code with the same lens and was implemented in this run.
+
+- [x] **N1. A reference release date that is not a real date is silently repaired into a different
+  one.** `AnalysisSupport.releaseDateToMillis` builds a `java.util.Calendar`, which is **lenient** by
+  default, and sets year/month/day on it: `2023-13-01` became 1 January 2024, `2023-02-30` became
+  2 March 2023 and `2023-04-31` became 1 May 2023. The value flows straight into
+  `DefaultAgeEstimator`, so one mistyped `releaseDate` in the hand-curated reference set would have
+  produced a plausible, wrong "Model launch date", a wrong "Model age" and a wrong age input to the
+  score — and, in a report whose whole premise is that it does not assert what it cannot support, a
+  date the data never contained. *Change:* the parse is strict. An impossible month or day is refused
+  before `Calendar` sees it, `isLenient` is off so a day the month does not have (including
+  `2023-02-29`) throws and is caught, and the result is `null` — the same answer as an absent date —
+  instead of a different date. Valid dates, the coarse `2023-03` and `2023` forms and UTC midnight are
+  unchanged, byte for byte. *Invisible on the shipped data:* all sixteen `releaseDate` values in
+  `device_reference.json` are real calendar dates, so no device's launch date, model age or score
+  moves; only a value the set could never have meant is now rejected. Seven tests in the new
+  `ReferenceDateTest`: an exact date and its UTC millis, the two coarse forms, month 13 and month 0,
+  `2023-02-30`/`2023-04-31`/`2023-01-32`, a real leap day against `2023-02-29`, the absent and
+  unparseable cases, and a guard that loads the bundled asset through `ReferenceAssetParser` and
+  asserts every entry's `releaseDate` parses and is in the past — so a future typo fails a test rather
+  than silently dropping a model's launch date on a device. `assembleDebug` green, all **308** unit
+  tests pass (301 before, 7 new), no `ui/` or `res/` file touched (the diff is one production file,
+  one test file and this document), and no screen, control, style, layout, copy or reported value
+  changes.
+  *Environment note:* GitHub release downloads answered 504 this run, so the toolchain came from the
+  same assets through the GitHub API; Maven Central answered 429, so test dependencies resolved
+  through `maven-central.storage-download.googleapis.com` via a local init script and Robolectric's
+  five runtime jars were served from `ROBOLECTRIC_DEPENDENCY_DIR`. No build file, repository list or
+  dependency changed.
 
 ---
 

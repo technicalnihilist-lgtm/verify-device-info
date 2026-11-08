@@ -88,6 +88,19 @@ internal object AnalysisSupport {
         }
     }
 
+    /**
+     * A reference release date — `2023-03-14`, or the coarser `2023-03` and `2023` — as UTC
+     * midnight, or `null` when it is not a real calendar date.
+     *
+     * The parse is strict on purpose. `Calendar` is lenient by default, so `2023-13-01` silently
+     * became 1 January 2024 and `2023-02-30` became 2 March: a mistyped curation date produced a
+     * plausible, wrong launch date, a wrong "Model age" and a wrong age input to the score, with
+     * nothing on screen to say the date had been repaired. A date that is not a date is not
+     * evidence, so it is reported as missing rather than as a different date.
+     *
+     * Every `releaseDate` in the bundled reference set is a real calendar date, so this changes
+     * nothing for the shipped data; it only refuses a value the set could never have meant.
+     */
     fun releaseDateToMillis(date: String?): Long? {
         if (date.isNullOrBlank()) return null
         return try {
@@ -95,7 +108,10 @@ internal object AnalysisSupport {
             val year = parts[0].toInt()
             val month = if (parts.size > 1) parts[1].toInt() else 1
             val day = if (parts.size > 2) parts[2].toInt() else 1
+            // Refuse an impossible month or day before Calendar gets a chance to roll it over.
+            if (month !in 1..12 || day !in 1..31) return null
             val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+            cal.isLenient = false
             cal.clear()
             cal.set(year, month - 1, day)
             cal.timeInMillis
