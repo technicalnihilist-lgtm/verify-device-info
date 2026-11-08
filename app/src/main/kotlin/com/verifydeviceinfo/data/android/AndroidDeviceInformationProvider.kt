@@ -35,7 +35,13 @@ import kotlinx.coroutines.withContext
  */
 class AndroidDeviceInformationProvider(
     private val context: Context,
-    private val props: SystemPropertyReader = SystemPropertyReader()
+    private val props: SystemPropertyReader = SystemPropertyReader(),
+    /**
+     * Builds the timer that runs the stages. A parameter only so a test can drive the deadline
+     * wiring — the promise that a scan whose stages never answer still finishes with a snapshot —
+     * without a device that hangs; production always takes the default.
+     */
+    private val timerFactory: (CoroutineScope) -> StageTimer = { StageTimer(it) }
 ) : DeviceInformationProvider {
 
     override val platform: Platform = Platform.ANDROID
@@ -52,7 +58,7 @@ class AndroidDeviceInformationProvider(
             var done = 0
             val errors = mutableListOf<String>()
             val fields = mutableListOf<SpecField>()
-            val timer = StageTimer(stageScope)
+            val timer = timerFactory(stageScope)
 
             fun stage(label: String) {
                 done++

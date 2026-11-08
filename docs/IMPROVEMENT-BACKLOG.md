@@ -1261,6 +1261,80 @@ findings below were added. L1 was implemented in this run.
   Central answered 429 for `org.robolectric:nativeruntime-dist-compat:1.0.16` throughout this run;
   it was served from a local file repository through a sandbox-only init script, so no build file,
   repository list or dependency changed.
+---
+
+## M. Audit findings — 8 November run, third pass
+
+Every item still open above was re-read this run and is unchanged: F1 and F3/I8 are blocked by this
+host (2 cores, 2,098 MB — `minifyReleaseWithR8` and `lintAnalyzeDebug` are both non-resumable and do
+not fit in a 300 s call), G1 and I10 would only duplicate numbers F5 and the individual entries
+already carry, H2/H5/H7/H9/H11/H13 are new rows, cards or copy on a screen, H14 is missing sourceable
+data, and L2 would flip a reported verdict. None of them was re-attempted, and nothing was marked
+done that was not done. What follows was found by reading the code with the same lens.
+
+- [x] **M1. The scan's stage-timeout wiring has no test.** `AndroidDeviceInformationProvider` promises
+  that "the scan always finishes with whatever it could read" — a stage that never answers is
+  abandoned, recorded in `collectionErrors`, and the stages after it still run. `StageTimerTest`
+  covers the timer in isolation and the provider's collectors need a device, so the promise itself —
+  the thing the whole `StageTimer`/`ScanCoordinator` design exists for — was verified by inspection
+  only. *Done:* the timer is now built by a `timerFactory: (CoroutineScope) -> StageTimer` constructor
+  parameter whose default is exactly the previous `StageTimer(stageScope)` call, so production
+  behaviour is unchanged and a test can drive the deadline without a device that hangs.
+  `ScanTimeoutWiringTest` (Robolectric, API 34) runs the real provider with a whole-scan budget of
+  zero — the state a wedged scan reaches — and pins that nine collection stages are all reported as
+  timed out (nine, not eight: connectivity/audio and security/software each share one progress step),
+  that a snapshot is still returned and is not flagged as mock data, and that the fallbacks are the
+  values the app already showed: `Build.MANUFACTURER`/`MODEL` for identity, `null` marketing name,
+  zero cores and zero RAM, `Unknown` battery health with code 0, and no invented spec fields.
+  *Found while writing it, recorded as M2 below:* the provider declares `total = 8` progress stages
+  but only calls `stage()` seven times, so its own `finished` flag is never set.
+  `assembleDebug` green, all **301** unit tests pass (299 before, 2 new), `tools/check-no-ui-change.sh`
+  clean (31 files under `ui/` and `res/`, none differs). No screen, control, style, layout, copy or
+  reported value changes — the diff is one constructor parameter and one new test file.
+  *Environment note:* this run's sandbox restarted mid-way and lost the toolchain and the checkout, so
+  the build was repeated from cold; and Maven Central answered 429 for
+  `org.robolectric:nativeruntime-dist-compat:1.0.16`, served from a local file repository through a
+  sandbox-only init script, while Robolectric's own runtime jars were fetched from
+  `maven-central.storage-download.googleapis.com` through `robolectric.dependency.repo.url`. No build
+  file, repository list or dependency changed.
+- [ ] **M2. The scan reports seven progress steps but declares eight.** In
+  `AndroidDeviceInformationProvider.collect`, `total = 8` while `stage(...)` is called seven times
+  (identity, hardware, battery, cameras, sensors, "Connectivity and audio", "Security and installed
+  software"), so `finished = done == total` never becomes true and the bar reaches only
+  `7 / 8` = 88% before `AppViewModel` publishes its own `ScanProgress(8, 8, "Complete", finished =
+  true)`. The collector's own progress contract — every stage reported, the last one finishing the
+  scan — is therefore not met by the collector. *Change:* either count the nine collectors as nine
+  steps or set `total` to the number of `stage()` calls. *Needs sign-off:* the bar's percentage is
+  rendered (`"${(fraction * 100).roundToInt()}%"` in `ScanProgressBar`), so the number a user watches
+  during a scan changes from 88% to 100% — a visible change, and the reason it was not fixed here.
+- [ ] **M3. The same sensor count is computed two different ways in one report.**
+  `DefaultScoreEngine` counts sensors with `logicalSensorCount(hardware.sensors)` for the "Sensors
+  enumerated" input of *Hardware health*, and with `hardware.sensors.size` for the "Sensor count"
+  input of *Display and sensors* — whose comment says it excludes the wake-up handles "the way the
+  hardware screen counts them", which the code beside it does not. On a device that publishes a
+  wake-up handle per sensor (most of them; H4) the two inputs of the same report disagree, one reads
+  `50` where the other reads `100`, and the Display-and-sensors score is depressed by the raw count.
+  *Change:* use `logicalSensorCount` in both places. *Needs sign-off:* both inputs render their value
+  ("48 sensors"), so the fix changes a value the user reads and moves a score.
+- [ ] **M4. `PageWriter.finishPage` leaves the small paint at 7.5pt.** `finishPage` sets
+  `smallPaint.textSize = 7.5f` to draw the page footer and never restores the 8pt it was built with,
+  so from page 2 onward every `small(...)` line (evidence bullets, limitations, the closing
+  disclaimer) renders 0.5pt smaller and wraps differently than the same text on page 1. The A5 entry
+  already notes this. *Change:* draw the footer with its own paint, or save and restore the size.
+  *Needs sign-off:* it changes the rendered PDF export, which is a document the user sends to someone
+  else — the same "deliberate decision" A5 asked for, not a drive-by edit.
+- [ ] **M5. The JSON export is written on the main thread, and not atomically.**
+  `AppViewModel.exportJson` calls `reportGenerator.toJson(...)` and then
+  `File(cacheDir, "verify-device-info-report.json").writeText(text)` inside `viewModelScope.launch`,
+  which is `Dispatchers.Main.immediate`: the encode hops to `Dispatchers.Default` but the full report's
+  disk write runs on the UI thread, and `writeText` truncates the previous export before writing the
+  new one, so an export interrupted mid-write leaves a half-written file that is then shared as if it
+  were whole. *Change (written, built and tested this run, then reverted):* a `ReportGenerator.toJsonFile`
+  that encodes on `Default` and writes through the existing, already-tested `atomicWriteText` helper on
+  `Dispatchers.IO`. *Blocked by the UI gate:* the only call site is `ui/AppViewModel.kt`, and
+  `tools/check-no-ui-change.sh` treats every file under `ui/` as UI surface, so the change fails the
+  repository's own gate even though it renders nothing. *Needs a decision:* either the gate learns
+  that `AppViewModel` holds no rendering, or this waits for the design pass.
 
 ---
 
