@@ -20,34 +20,52 @@ class AudioProbe(private val context: Context) {
     private var recorder: MediaRecorder? = null
 
     /** Plays a clean sine tone; returns false if audio output could not be started. */
-    fun playTone(frequencyHz: Double = 440.0, durationMs: Int = 2000): Boolean = try {
+    fun playTone(frequencyHz: Double = 440.0, durationMs: Int = 2000): Boolean =
+        playTone(frequencyHz, durationMs) { samples ->
+            AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(SAMPLE_RATE_HZ)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .setBufferSizeInBytes(samples.size * 2)
+                .build()
+        }
+
+    /**
+     * The tone body, with the track supplied by the caller so the failure paths can be driven
+     * without a device. Production always goes through the no-argument overload above.
+     */
+    internal fun playTone(
+        frequencyHz: Double,
+        durationMs: Int,
+        newTrack: (ShortArray) -> AudioTrack,
+    ): Boolean = try {
         stopTone()
-        val sampleRate = 44100
-        val count = (sampleRate * durationMs / 1000)
+        val count = SAMPLE_RATE_HZ * durationMs / 1000
         val samples = ShortArray(count)
         for (i in 0 until count) {
-            samples[i] = (sin(2.0 * Math.PI * i * frequencyHz / sampleRate) * Short.MAX_VALUE * 0.6).toInt().toShort()
+            samples[i] =
+                (sin(2.0 * Math.PI * i * frequencyHz / SAMPLE_RATE_HZ) * Short.MAX_VALUE * 0.6).toInt().toShort()
         }
-        val track = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setTransferMode(AudioTrack.MODE_STATIC)
-            .setBufferSizeInBytes(samples.size * 2)
-            .build()
+        val track = newTrack(samples)
+        // Held from construction, exactly as the recorder below is: `write` and `play` both throw
+        // IllegalStateException on a track the output device left uninitialised (no usable route,
+        // an unplugged sink), and the catch can only give back a track it can still see. Assigning
+        // after `play` meant every failed attempt leaked a built track, its static buffer and its
+        // AudioFlinger client until the finalizer ran, once per tap of the play button.
+        audioTrack = track
         track.write(samples, 0, samples.size)
         track.play()
-        audioTrack = track
         true
     } catch (e: Exception) {
         stopTone()
@@ -144,5 +162,10 @@ class AudioProbe(private val context: Context) {
     fun release() {
         stopTone()
         releaseRecorder()
+    }
+
+    private companion object {
+        /** 44.1 kHz mono PCM16: the rate the tone is generated at and the track is built for. */
+        const val SAMPLE_RATE_HZ = 44100
     }
 }

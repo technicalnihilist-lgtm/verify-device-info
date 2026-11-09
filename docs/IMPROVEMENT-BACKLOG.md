@@ -1642,6 +1642,59 @@ the equivalence itself does not depend on the measurer, and is proven for three 
 
 ---
 
+---
+
+## S. Audit findings — 9 November run, third pass
+
+The seventeen items still open above were re-read against the code before anything new was added, and
+each still fails for the reason already written against it: F1, F3 and I8 need one Gradle invocation
+longer than 300 s on this 2-core / 2,098 MB sandbox (`minifyReleaseWithR8`, `lintAnalyzeDebug`; neither
+resumes across a call), G1 and I10 would duplicate numbers their own entries already carry, H2, H5, H7,
+H9, H11 and H13 each need a new row, card or copy on a screen, H14 needs codenames the recorded sources
+do not publish, and L2, M2, M3, M4 and P2 each move a value, a percentage or a verdict the user reads.
+Nothing was ticked that was not done. The item below was found by re-reading the diagnostics probes with
+the memory-and-lifecycle lens of section C.
+
+- [x] **S1. A tone that could not start leaked its `AudioTrack`.** `AudioProbe.playTone` built an
+  `AudioTrack`, wrote the tone into it and started it, and only then put it in the `audioTrack` field the
+  cleanup path releases. Both `write` and `play` throw `IllegalStateException` when the track is not in
+  the `INITIALIZED` state — no usable output route, an unplugged or handed-over sink, a device whose audio
+  HAL refused the configuration — so on exactly the devices where the play button does not work, the
+  catch ran `stopTone()` with the field still empty (or still holding the previous, already-released
+  track) and the track just built was never released. Each failed tap therefore left behind a native
+  track, its AudioFlinger client and its static buffer — 176,400 bytes of samples for the default
+  two-second mono tone (88,200 samples × 2 bytes, arithmetic, not measured) — until the finalizer got to
+  it, while the user, hearing nothing, tapped again. *Done:* the field is assigned immediately after the
+  track is built, before `write` and `play`, so the existing catch gives it back through the same
+  `stopTone()` — the rule the recorder path already follows since L1 ("held from construction"). The
+  public `playTone(frequencyHz, durationMs)` keeps its signature, its builder settings and its sample
+  generation byte for byte; its body moved into an `internal` overload that takes the track from the
+  caller, the same seam shape as `measureMicrophone`'s `newRecorder`, so the failure paths can be driven
+  on a JVM. The sample rate is now one private constant instead of a local, and nothing else in the
+  class, the screen that calls it or the reported facts changed.
+  *Tests:* six in the new `AudioProbeToneReleaseTest`, over a fake `AudioTrack`: a `write` that throws
+  releases the track exactly once and never starts it, a `play` that throws releases it, a successful
+  tone keeps the track until `stopTone()` releases it once, a second tone releases the first and only the
+  first, a failed tone leaves nothing for `release()` to free twice, and the generated tone still has the
+  same 88,200 samples with a 19,650–19,661 peak. *Mutation-checked, not just green:* moving the
+  assignment back after `play()` made exactly three of them fail — `aWriteThatThrowsReleasesTheTrack`,
+  `aPlayThatThrowsReleasesTheTrack`, `aFailedToneLeavesNothingForReleaseToFree` — and the file was then
+  restored byte for byte from the copy taken before the mutation. `assembleDebug` green; **348** unit
+  tests pass (342 before, 6 new); `tools/check-no-ui-change.sh` clean (31 files tracked under `ui/` and
+  `res/`, none differs); debug APK 9,827,992 bytes, unchanged. *Not verified on a device:* no device is
+  available here, and Robolectric's shadow `AudioTrack` does not model AudioFlinger, so the leak is
+  asserted as "`release()` is called on every failure path" rather than observed as a freed native
+  client. The fake is a subclass built through the deprecated `AudioTrack(...)` constructor; production
+  still builds its track through `AudioTrack.Builder`, unchanged.
+  *Environment note:* this run's cold build only fit inside a 300 s call after applying the lever
+  recorded under F1 — the sandbox exports `JAVA_TOOL_OPTIONS=-XX:CompressedClassSpaceSize=64m`, which
+  starves the Kotlin compiler, and a 1750 MB heap on this 2 GB host thrashes instead of helping. With
+  `JAVA_TOOL_OPTIONS` unset and `-Xmx1400m -XX:MaxMetaspaceSize=512m`, `:app:compileDebugKotlin` finished
+  in 4m08s and the rest of `assembleDebug` in 3m37s. No build file, repository list, dependency or heap
+  setting in the repository was changed for it.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
