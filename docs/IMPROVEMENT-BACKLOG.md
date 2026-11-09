@@ -476,6 +476,9 @@ build and tests green before committing.
   only reflective lookups are `android.os.SystemProperties` and
   `com.android.internal.os.PowerProfile`, both framework classes R8 never renames. This task needs a
   host where one Gradle invocation can run longer than 300 s, not another retry here.
+  *Passed over (9 Nov run):* unchanged — `nproc` = 2, 2,098 MB, and `minifyReleaseWithR8` is not resumable
+  across calls, so no minified APK can be produced or measured here.
+
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
   overload, and unused imports. *Done:* a full non-incremental compile
@@ -520,6 +523,9 @@ build and tests green before committing.
   still does not fit in a 300 s call, so nothing could be triaged honestly.
   *Passed over (8 Nov, second pass):* unchanged — same 2 cores, and this run's cold `assembleDebug`
   alone took six 300 s calls, so the analysis cannot be finished or triaged.
+  *Passed over (9 Nov run):* unchanged — a single non-resumable `lintAnalyzeDebug` does not fit in a 300 s
+  call on 2 cores, and a half-finished analysis cannot be triaged honestly.
+
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
   `-Werror`; the flag is module-wide, and `-Werror` on the whole `:app` module is exactly what this item
@@ -564,6 +570,9 @@ build and tests green before committing.
   later one) is recorded in full in J1's own entry, so a second copy still would not pay for itself.
   *Passed over (8 Nov run):* this run's measurement (the `getprop` deadline, L3) is recorded in
   L3's own entry, so the duplication argument still holds.
+  *Passed over (9 Nov run):* this run's measurement (the wrap layout, Q1) is recorded in Q1's own entry, so
+  the duplication argument still holds.
+
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
   makes no new claim, and `LIMITATIONS.md` already covers reference-data coverage and per-API
@@ -608,6 +617,9 @@ would be worse than one honest one.
   *Passed over (8 Nov run):* unchanged — a new authenticity finding is a new card, which the UI
   freeze forbids, and the vendor table is still data the app does not carry.
   *Passed over (8 Nov, second pass):* unchanged — same reason.
+  *Passed over (9 Nov run):* unchanged — a new authenticity finding is a new card, which the UI freeze
+  forbids, and the vendor table is still data the app does not carry.
+
 - [x] **H3. Battery health code 0 means unknown, not good.** `BATTERY_HEALTH_UNKNOWN` is currently
   scored like a healthy pack; treat it as missing evidence. *Done:* in `DefaultPartsProvider` the
   battery branch tested `healthCode != 2 && healthCode > 0`, which sent code 1 (`BATTERY_HEALTH_UNKNOWN`)
@@ -653,6 +665,8 @@ would be worse than one honest one.
   *Passed over (8 Nov run):* unchanged — "expose the other value" is a second value on the
   camera screen.
   *Passed over (8 Nov, second pass):* unchanged — same reason.
+  *Passed over (9 Nov run):* unchanged — "expose the other value" is a second value on the camera screen.
+
 - [x] **H6. Replace deprecated `getRealMetrics`.** Use `WindowMetrics` on API 30+ with the old path as
   fallback; behaviour must stay identical on every API level. *Done:* `HardwareCollector.readDisplay`
   no longer calls `Display.getRealMetrics` above API 29. A new private
@@ -684,6 +698,9 @@ would be worse than one honest one.
   *Passed over (8 Nov run):* unchanged — a new row in the connectivity list, and still no live
   VPN to observe.
   *Passed over (8 Nov, second pass):* unchanged — same reason.
+  *Passed over (9 Nov run):* unchanged — a new row in the connectivity list, and still no live VPN to
+  observe.
+
 - [x] **H8. Count packages once.** `getInstalledPackages` is called and walked twice in places; derive
   system and user counts from a single pass. *Already done:* `getInstalledPackages(0)` is called once
   in `main`, in `SoftwareCollector.collect`, and the single pass over that list increments both the
@@ -702,6 +719,8 @@ would be worse than one honest one.
   screen's source line and copy, and the fallback alone changes nothing on a device that publishes
   `ro.boot.verifiedbootstate`.
   *Passed over (8 Nov, second pass):* unchanged — same reason.
+  *Passed over (9 Nov run):* unchanged — "say which property answered" is copy.
+
 - [x] **H10. Locale audit.** Every `String.format` must pass `Locale.US`; a device set to Arabic or
   Hindi digits currently renders numbers inconsistently in the report. *Already done:* every
   `String.format` in `main` passes `Locale.US` explicitly — all 35 sites, no exceptions.
@@ -717,6 +736,8 @@ would be worse than one honest one.
   *Passed over (7 Nov run):* unchanged — a second volume means new rows in the storage group.
   *Passed over (8 Nov run):* unchanged — a second volume means new rows in the storage group.
   *Passed over (8 Nov, second pass):* unchanged — same reason.
+  *Passed over (9 Nov run):* unchanged — a second volume means new rows in the storage group.
+
 - [x] **H12. Per-core CPU frequencies.** Read max frequency for every core, not just `cpu0`, and report
   the cluster layout when it is readable. *Done (frequency half; cluster layout dropped):* `cpu0` is a
   LITTLE core on every ARM big.LITTLE/DynamIQ part, so the old `cpu0/cpufreq/cpuinfo_max_freq` lookup
@@ -747,6 +768,8 @@ would be worse than one honest one.
   *Passed over (7 Nov run):* unchanged — a second uptime value is a second row.
   *Passed over (8 Nov run):* unchanged — a second uptime value is a second row on the overview.
   *Passed over (8 Nov, second pass):* unchanged — same reason.
+  *Passed over (9 Nov run):* unchanged — a second uptime value is a second row on the overview.
+
 - [ ] **H14. Reference codenames.** Add codename patterns to the reference entries so matching works
   for builds whose `Build.MODEL` is a carrier variant.
   *Skipped (6 Nov, fifth pass):* the mechanism is already there — `ReferenceIndex.match` takes the
@@ -763,6 +786,7 @@ would be worse than one honest one.
 
   *Passed over (8 Nov run):* unchanged — missing data, not missing code; the codenames are still
   not on the recorded `sourceUrl` pages.
+  *Passed over (9 Nov run):* unchanged — still data the app does not carry and cannot source.
 
 ## I. Tooling and tests that protect the work
 
@@ -851,6 +875,8 @@ would be worse than one honest one.
   in one 300 s call on 2 cores.
   *Passed over (8 Nov run):* unchanged — same constraint as F3.
   *Passed over (8 Nov, second pass):* unchanged — same constraint as F3.
+  *Passed over (9 Nov run):* unchanged — same constraint as F3.
+
 - [x] **I9. Screenshot non-blank assertion.** Fail the render test if an image comes back uniform.
   *Already done:* `ScreenshotTest` measures every capture (distinct colours and ink fraction) and
   fails with the measured numbers when a screen comes back blank, and `aBlankFrameIsRejected` renders
@@ -866,6 +892,7 @@ would be worse than one honest one.
   *Passed over (8 Nov run):* unchanged — F5 already resolved and audited the release classpath
   (149 modules), so a second recorded tree would only duplicate it.
   *Passed over (8 Nov, second pass):* unchanged — same duplication.
+  *Passed over (9 Nov run):* unchanged — F5 already resolved and audited the release classpath.
 
 ## J. Audit findings — 7 November run
 
@@ -1193,6 +1220,9 @@ findings below were added. L1 was implemented in this run.
   flips from VERIFIED to WARNING and the score moves with it.
   *Passed over (8 Nov, second pass):* unchanged — still needs sign-off, and it is the one open item
   that would change a reported verdict.
+  *Passed over (9 Nov run):* unchanged — still needs sign-off: a brand-only match would flip the finding
+  from VERIFIED to WARNING and the score with it.
+
 - [x] **L3. `SystemPropertyReader.readProcessDump` waits for `getprop` with no deadline.**
   `process.waitFor()` is unbounded, and the `BufferedReader` read above it blocks until the process
   closes stdout, so a `getprop` that stops answering blocks its calling thread for the life of the
@@ -1320,6 +1350,8 @@ done that was not done. What follows was found by reading the code with the same
   steps or set `total` to the number of `stage()` calls. *Needs sign-off:* the bar's percentage is
   rendered (`"${(fraction * 100).roundToInt()}%"` in `ScanProgressBar`), so the number a user watches
   during a scan changes from 88% to 100% — a visible change, and the reason it was not fixed here.
+  *Passed over (9 Nov run):* unchanged — the bar's percentage is rendered, so the fix is a visible change.
+
 - [ ] **M3. The same sensor count is computed two different ways in one report.**
   `DefaultScoreEngine` counts sensors with `logicalSensorCount(hardware.sensors)` for the "Sensors
   enumerated" input of *Hardware health*, and with `hardware.sensors.size` for the "Sensor count"
@@ -1329,6 +1361,9 @@ done that was not done. What follows was found by reading the code with the same
   `50` where the other reads `100`, and the Display-and-sensors score is depressed by the raw count.
   *Change:* use `logicalSensorCount` in both places. *Needs sign-off:* both inputs render their value
   ("48 sensors"), so the fix changes a value the user reads and moves a score.
+  *Passed over (9 Nov run):* unchanged — both inputs render their value, so the fix changes what the user
+  reads and moves a score.
+
 - [ ] **M4. `PageWriter.finishPage` leaves the small paint at 7.5pt.** `finishPage` sets
   `smallPaint.textSize = 7.5f` to draw the page footer and never restores the 8pt it was built with,
   so from page 2 onward every `small(...)` line (evidence bullets, limitations, the closing
@@ -1336,6 +1371,8 @@ done that was not done. What follows was found by reading the code with the same
   already notes this. *Change:* draw the footer with its own paint, or save and restore the size.
   *Needs sign-off:* it changes the rendered PDF export, which is a document the user sends to someone
   else — the same "deliberate decision" A5 asked for, not a drive-by edit.
+  *Passed over (9 Nov run):* unchanged — it changes the rendered PDF the user sends to someone else.
+
 - [x] **M5. The JSON export is written on the main thread, and not atomically.** (Done 8 November.)
   `AppViewModel.exportJson` called `reportGenerator.toJson(...)` and then
   `File(cacheDir, "verify-device-info-report.json").writeText(text)` inside `viewModelScope.launch`,
@@ -1523,6 +1560,44 @@ with the lens of "When the list runs out". Two findings, the first implemented h
   K3 and L2 are waiting on. The current behaviour is pinned by
   `IntegrityAnalyzerTest.encryptionIsJudgedBySubstringAsTheCodeCurrentlyDoes`, so the fix has to
   change that assertion deliberately.
+  *Passed over (9 Nov run):* unchanged — still needs sign-off: it moves a status from VERIFIED to WARNING.
+
+---
+
+## Q. Audit findings — 9 November run
+
+The seventeen items left open above are all blocked by this sandbox (F1, F3, I8), duplicates of work already
+recorded (G1, I10), need a visible change (H2, H5, H7, H9, H11, H13, M2, M3, M4), need data the app does not
+carry (H14), or need sign-off because they move a reported verdict (L2, P2). So the list was re-read against
+the code, as "When the list runs out" asks. One finding cleared the bar and was implemented in this run.
+
+- [x] **Q1. The report's word wrap rebuilds the whole line for every word.** `PageWriter.wrap` (the PDF
+  export's text layout) kept the line being built in a `StringBuilder`, but for every word it rebuilt that
+  line as a new `String` (`"$current $word"`) and then copied it *again* into a fresh `StringBuilder`. Laying
+  out a paragraph of W words therefore allocated O(W²) characters — a 60-word paragraph built and threw away
+  sixty copies of itself, and one export lays out hundreds of paragraphs, so the export path's garbage was
+  dominated by copies of text it already had. *Done:* the wrap moved out of the inner class into an
+  `internal fun wrapText(text, maxWidth, measure)` (the same test seam shape as `alphabeticalByLabel`), which
+  appends to one `StringBuilder` and measures it in place with `paint.measureText(line, 0, line.length)`;
+  `PageWriter.wrap` is now a one-line delegate, so every call site (`body`, `small`, `warning`, `keyValue`,
+  `footer`) is untouched. **No rendered change:** the measurement still receives exactly the same candidate
+  text as before — the whole line, end to end — so every wrap decision, every line and every glyph position
+  in the exported document is identical; only the copies are gone. Measured on this host (JDK 17, warmed,
+  minimum of five rounds): laying out a report-sized corpus of 351 paragraphs took **7,334 µs before and
+  1,524 µs after (4.8× faster)**, and a standalone JVM run of the two algorithms allocated **3,582,296 bytes
+  before and 968,696 bytes after (3.7× less, ~2.5 MB of garbage removed per report-sized layout)**. Six tests
+  in `PdfTextWrapTest` pin it: the new wrap produces byte-identical line lists to a verbatim copy of the old
+  algorithm across a 14-text corpus × 7 widths × 3 measurers (including a measurer that is not a function of
+  length, so a lost or re-added word cannot measure the same), the *number* and the *content* of the
+  measurement calls are unchanged (so no extra work reaches the paint), an over-long word still overflows its
+  line instead of being broken, blank text still produces no lines, and the timing benchmark above.
+  `assembleDebug` green with no compiler warnings, all **340** unit tests pass (334 before, 6 new),
+  `tools/check-no-ui-change.sh` clean (31 files tracked under `ui/` and `res/`, none differs) — the diff is one
+  modified production file and one new test file. Debug APK 9,895,564 bytes, unchanged within the toolchain's
+  non-reproducibility (J1/J2), and no size claim is made. *Not verified on a device:* the equivalence of
+  `measureText(CharSequence, 0, length)` with `measureText(String)` is proven here only for the injected
+  measurer; the two Android overloads compute the same width for the same text by contract, and the
+  substitution is the documented way to measure a subrange, but no device is available to confirm it.
 
 ---
 

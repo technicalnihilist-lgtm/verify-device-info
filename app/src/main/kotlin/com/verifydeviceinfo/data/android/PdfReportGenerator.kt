@@ -365,24 +365,54 @@ class PdfReportGenerator(private val context: Context) : ReportGenerator {
             finishPage()
         }
 
-        private fun wrap(text: String, paint: Paint, maxWidth: Float = pageWidth - margin * 2): List<String> {
-            if (text.isBlank()) return emptyList()
-            val words = text.split(" ")
-            val lines = mutableListOf<String>()
-            var current = StringBuilder()
-            words.forEach { word ->
-                val candidate = if (current.isEmpty()) word else "$current $word"
-                if (paint.measureText(candidate) <= maxWidth) {
-                    current = StringBuilder(candidate)
-                } else {
-                    if (current.isNotEmpty()) lines += current.toString()
-                    current = StringBuilder(word)
-                }
-            }
-            if (current.isNotEmpty()) lines += current.toString()
-            return lines
+        private fun wrap(text: String, paint: Paint, maxWidth: Float = pageWidth - margin * 2): List<String> =
+            wrapText(text, maxWidth) { line -> paint.measureText(line, 0, line.length) }
+    }
+}
+
+/**
+ * Greedy word wrap for the report's text: the longest run of words that fits [maxWidth], then the
+ * next line, until the text is placed.
+ *
+ * One [StringBuilder] holds the line being built. The previous version rebuilt that line as a new
+ * `String` for every word — `"$current $word"` — and then copied it *again* into a fresh
+ * `StringBuilder`, so laying out a paragraph of W words allocated O(W²) characters: a 60-word
+ * paragraph built and discarded sixty copies of itself, and the export lays out hundreds of
+ * paragraphs. The line is now appended in place and measured in place, so a word costs one append
+ * and one measurement.
+ *
+ * The measurement is the only thing still repeated, and it is repeated on exactly the same text as
+ * before — the whole candidate line, end to end — so every wrap decision, and therefore every line
+ * and every glyph position in the exported document, is unchanged. [measure] is a parameter only so
+ * the layout can be driven without a `Paint` (a unit-test seam, the same shape as
+ * [alphabeticalByLabel]'s); production passes the paint's own measurement.
+ */
+internal fun wrapText(
+    text: String,
+    maxWidth: Float,
+    measure: (CharSequence) -> Float
+): List<String> {
+    if (text.isBlank()) return emptyList()
+    val words = text.split(" ")
+    val lines = ArrayList<String>()
+    val current = StringBuilder()
+    for (word in words) {
+        // The candidate line is `current` plus a space plus this word, built in place.
+        val beforeWord = current.length
+        if (beforeWord > 0) current.append(' ')
+        current.append(word)
+        if (measure(current) <= maxWidth) continue
+        // It does not fit. The line that was already there is closed, and this word starts the
+        // next one — the same split the old candidate-string version made.
+        if (beforeWord > 0) {
+            current.setLength(beforeWord)
+            lines += current.toString()
+            current.setLength(0)
+            current.append(word)
         }
     }
+    if (current.isNotEmpty()) lines += current.toString()
+    return lines
 }
 
 /**
