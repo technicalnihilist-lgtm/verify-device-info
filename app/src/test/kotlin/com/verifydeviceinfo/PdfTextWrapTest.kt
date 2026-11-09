@@ -44,6 +44,38 @@ class PdfTextWrapTest {
         return lines
     }
 
+    /**
+     * The implementation this replaced: the same in-place line building, but the words come from
+     * `text.split(" ")` — one substring per word, plus the list that holds them, before any line
+     * is laid out. The current version reads the same words as ranges of the paragraph, so this is
+     * the reference that pins "same words, no substrings": including the empty words a run of two
+     * spaces and a trailing space produce.
+     */
+    private fun splitReferenceWrap(
+        text: String,
+        maxWidth: Float,
+        measure: (CharSequence) -> Float
+    ): List<String> {
+        if (text.isBlank()) return emptyList()
+        val words = text.split(" ")
+        val lines = mutableListOf<String>()
+        val current = StringBuilder()
+        for (word in words) {
+            val beforeWord = current.length
+            if (beforeWord > 0) current.append(' ')
+            current.append(word)
+            if (measure(current) <= maxWidth) continue
+            if (beforeWord > 0) {
+                current.setLength(beforeWord)
+                lines += current.toString()
+                current.setLength(0)
+                current.append(word)
+            }
+        }
+        if (current.isNotEmpty()) lines += current.toString()
+        return lines
+    }
+
     /** Fixed advance per character: the shape of a monospaced font, and the strictest test of breaks. */
     private fun perCharacter(advance: Float = 6f): (CharSequence) -> Float = { it.length * advance }
 
@@ -74,7 +106,15 @@ class PdfTextWrapTest {
         (1..40).joinToString(" ") { "x" },
         "a b c d e f g h i j k l m n o p q r s t u v w x y z",
         "",
-        "   "
+        "   ",
+        // The whitespace shapes the word scan has to reproduce exactly: a trailing space adds an
+        // empty word, a leading one adds an empty first word, and a run adds one per extra space.
+        "a ",
+        " a",
+        "a  b",
+        " a  b ",
+        "\ttab-separated\ttext stays one word",
+        "word ".repeat(30)
     )
 
     private val widths = listOf(1f, 10f, 40f, 120f, 300f, 555f, 10_000f)
@@ -92,6 +132,35 @@ class PdfTextWrapTest {
                     )
                 }
             }
+        }
+    }
+
+    @Test
+    fun `the word scan produces the same words as splitting the paragraph, whitespace included`() {
+        // The words used to come from `text.split(" ")`. Reading them as ranges must find exactly
+        // the same ones — an extra, missing or re-ordered word would change a line.
+        val measurers = listOf(perCharacter(), perCharacter(advance = 2.5f), perWord())
+        for (text in corpus) {
+            for (maxWidth in widths) {
+                for (measure in measurers) {
+                    assertEquals(
+                        "text='${text.take(40)}' maxWidth=$maxWidth",
+                        splitReferenceWrap(text, maxWidth, measure),
+                        wrapText(text, maxWidth, measure)
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a paragraph made only of spaces wraps to no lines, as it always did`() {
+        // `split(" ")` on "  " yields three empty words, and the previous wrap still placed none
+        // of them: the whole text is blank, so nothing is laid out. The range scan must agree.
+        val measure: (CharSequence) -> Float = { it.length * 6f }
+        for (text in listOf(" ", "  ", "    ", "\t")) {
+            assertTrue(splitReferenceWrap(text, 100f, measure).isEmpty())
+            assertTrue(wrapText(text, 100f, measure).isEmpty())
         }
     }
 

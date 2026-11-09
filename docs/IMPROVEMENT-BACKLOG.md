@@ -478,6 +478,9 @@ build and tests green before committing.
   host where one Gradle invocation can run longer than 300 s, not another retry here.
   *Passed over (9 Nov run):* unchanged — `nproc` = 2, 2,098 MB, and `minifyReleaseWithR8` is not resumable
   across calls, so no minified APK can be produced or measured here.
+  *Passed over (9 Nov, second pass):* unchanged — `nproc` = 2, 2,098 MB, and this pass's cold
+  `assembleDebug` took eight 300 s calls before it first went green, so the non-resumable
+  `minifyReleaseWithR8` again had nowhere to run.
 
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
@@ -525,6 +528,8 @@ build and tests green before committing.
   alone took six 300 s calls, so the analysis cannot be finished or triaged.
   *Passed over (9 Nov run):* unchanged — a single non-resumable `lintAnalyzeDebug` does not fit in a 300 s
   call on 2 cores, and a half-finished analysis cannot be triaged honestly.
+  *Passed over (9 Nov, second pass):* unchanged — same 2 cores, and the cold build alone consumed most of
+  this pass's 300 s calls, so the analysis still cannot be finished or triaged honestly.
 
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
@@ -1598,6 +1603,42 @@ the code, as "When the list runs out" asks. One finding cleared the bar and was 
   `measureText(CharSequence, 0, length)` with `measureText(String)` is proven here only for the injected
   measurer; the two Android overloads compute the same width for the same text by contract, and the
   substitution is the documented way to measure a subrange, but no device is available to confirm it.
+
+---
+
+## R. Audit findings — 9 November run, second pass
+
+The seventeen items still open above were re-read against the code and passed over for the same reasons
+as before, none of them new: blocked by this sandbox (F1, F3, I8 — 2 cores / 2,098 MB, where the cold
+`assembleDebug` alone needed eight 300 s calls), duplicates of work already recorded (G1, I10), a visible
+change (H2, H5, H7, H9, H11, H13, M2, M3, M4), data the app does not carry and cannot source (H14), or
+sign-off because they move a reported verdict (L2, P2). One finding from re-reading the export path
+cleared the bar and was implemented in this run.
+
+- [x] **R1. The report's word wrap still allocated a substring per word.** `wrapText` (the PDF export's
+text layout) was rewritten in Q1 to stop rebuilding the line per word, but it still took its words from
+`text.split(" ")`: one `String` per word, plus the `ArrayList` that holds them, allocated before the first
+line could be laid out. A 60-word paragraph allocated sixty substrings it then only read, and one export
+lays out hundreds of paragraphs, so the split was the largest allocation left in the wrap. *Done:* the
+words are now read as ranges of the paragraph (`indexOf(' ')` from the previous boundary) and appended
+straight into the line with `StringBuilder.append(CharSequence, start, end)`, so the scan allocates
+nothing but the line and its result. The ranges are exactly the words `split(" ")` produced — empty
+words included, which is what a run of two spaces and a trailing space each add — so the sequence of
+appends, the measurements, and therefore every line and every glyph position are unchanged. The old
+`split` version is kept verbatim in `PdfTextWrapTest.splitReferenceWrap` as the reference the new scan is
+checked against, over the corpus (now extended with `"a "`, `" a"`, `"a  b"`, `" a  b "`, a
+tab-separated line and thirty trailing-space words) × 7 widths × 3 measurers, plus a test that a
+whitespace-only paragraph still produces no lines. *Measured:* on this host (JDK 17, warmed, minimum of
+five rounds, a report-sized corpus of 351 paragraphs, both algorithms through the same length-based
+measurer, allocation from `ThreadMXBean.getThreadAllocatedBytes`) the wrap went from **532 µs and
+442,600 bytes to 304 µs and 168,320 bytes** — 1.75× faster and **274 KB less garbage per report-sized
+layout**. In the repository's own benchmark test (`PdfTextWrapTest`, 351 paragraphs) the Q1 comparison
+still reports 6,584 µs for the original candidate-string wrap against 1,736 µs now. `assembleDebug`
+green, all **342** unit tests pass (340 before, 2 new), `tools/check-no-ui-change.sh` clean (31 files
+tracked under `ui/` and `res/`, none differs) — the diff is one modified production function and its
+test. No rendered change: same lines, same breaks, same PDF. *Not verified on a device:* the timing is
+the algorithm's on a JVM with a length-based measurer, not a `Paint`'s, and no device is available here;
+the equivalence itself does not depend on the measurer, and is proven for three of them.
 
 ---
 

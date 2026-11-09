@@ -386,6 +386,11 @@ class PdfReportGenerator(private val context: Context) : ReportGenerator {
  * and every glyph position in the exported document, is unchanged. [measure] is a parameter only so
  * the layout can be driven without a `Paint` (a unit-test seam, the same shape as
  * [alphabeticalByLabel]'s); production passes the paint's own measurement.
+ *
+ * The words themselves are read as ranges of [text] rather than through `text.split(" ")`, which
+ * allocated one substring per word plus the list holding them before a single line could be laid
+ * out — 274 KB of throw-away strings for a report-sized corpus, measured on the JDK. The ranges are
+ * the ones `split(" ")` produced, empty words included, so the appends and the lines are identical.
  */
 internal fun wrapText(
     text: String,
@@ -393,23 +398,33 @@ internal fun wrapText(
     measure: (CharSequence) -> Float
 ): List<String> {
     if (text.isBlank()) return emptyList()
-    val words = text.split(" ")
     val lines = ArrayList<String>()
     val current = StringBuilder()
-    for (word in words) {
+    // Words are read as ranges of `text` and appended straight into the line, so a paragraph of W
+    // words no longer allocates W substrings (plus the list holding them) before it can start
+    // laying anything out. The word boundaries are exactly the ones `text.split(" ")` produced,
+    // empty words included — a run of two spaces yields an empty word, and a trailing space yields
+    // a final empty word — so the sequence of appends, and therefore every line, is unchanged.
+    var index = 0
+    while (true) {
+        val space = text.indexOf(' ', index)
+        val wordEnd = if (space < 0) text.length else space
         // The candidate line is `current` plus a space plus this word, built in place.
         val beforeWord = current.length
         if (beforeWord > 0) current.append(' ')
-        current.append(word)
-        if (measure(current) <= maxWidth) continue
-        // It does not fit. The line that was already there is closed, and this word starts the
-        // next one — the same split the old candidate-string version made.
-        if (beforeWord > 0) {
-            current.setLength(beforeWord)
-            lines += current.toString()
-            current.setLength(0)
-            current.append(word)
+        current.append(text, index, wordEnd)
+        if (measure(current) > maxWidth) {
+            // It does not fit. The line that was already there is closed, and this word starts the
+            // next one — the same split the old candidate-string version made.
+            if (beforeWord > 0) {
+                current.setLength(beforeWord)
+                lines += current.toString()
+                current.setLength(0)
+                current.append(text, index, wordEnd)
+            }
         }
+        if (space < 0) break
+        index = space + 1
     }
     if (current.isNotEmpty()) lines += current.toString()
     return lines
