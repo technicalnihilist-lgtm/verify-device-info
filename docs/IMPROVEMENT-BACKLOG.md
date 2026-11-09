@@ -438,6 +438,8 @@ build and tests green before committing.
   confirmed this run: the repo's `-XX:MaxMetaspaceSize=320m` is too small for the Compose compile —
   the daemon expires out of metaspace and the build fails — so the release path needs a raised
   metaspace ceiling *and* a 1750 MB heap, which is 2 GB of a 2 GB machine before R8 starts.
+  *Passed over (10 Nov run):* unchanged — `nproc` = 2, `free` = 2,098 MB, the same host as every
+  attempt above, so a non-resumable `minifyReleaseWithR8` still cannot be produced or measured here.
   *Passed over (6 Nov, sixth pass):* unchanged — `nproc` = 2, 2,098 MB. This run's cold
   `assembleDebug` needed six calls and a further one for `testDebugUnitTest`, so the non-resumable
   `minifyReleaseWithR8` still has nowhere to run. Nothing in the release path can be checked here.
@@ -518,6 +520,8 @@ build and tests green before committing.
   `lintAnalyzeDebug` has no room to finish either.
   *Passed over (6 Nov, sixth pass):* same constraint — this run's cold `assembleDebug` alone took six
   300 s calls on 2 cores, so a single non-resumable `lintAnalyzeDebug` cannot be finished or triaged.
+  *Passed over (10 Nov run):* same constraint, unchanged hardware (2 cores / 2,098 MB); a
+  half-finished analysis still cannot be triaged honestly, so nothing was suppressed.
   *Passed over (7 Nov run):* unchanged — 2 cores, and a single non-resumable `lintAnalyzeDebug`
   still does not fit in a 300 s call, so nothing could be triaged honestly.
   *Passed over (7 Nov, third pass):* unchanged — same 2 cores / 2,098 MB, and this run's cold
@@ -881,6 +885,7 @@ would be worse than one honest one.
   *Passed over (8 Nov run):* unchanged — same constraint as F3.
   *Passed over (8 Nov, second pass):* unchanged — same constraint as F3.
   *Passed over (9 Nov run):* unchanged — same constraint as F3.
+  *Passed over (10 Nov run):* unchanged — same constraint as F3.
 
 - [x] **I9. Screenshot non-blank assertion.** Fail the render test if an image comes back uniform.
   *Already done:* `ScreenshotTest` measures every capture (distinct colours and ink fraction) and
@@ -1692,6 +1697,46 @@ the memory-and-lifecycle lens of section C.
   `JAVA_TOOL_OPTIONS` unset and `-Xmx1400m -XX:MaxMetaspaceSize=512m`, `:app:compileDebugKotlin` finished
   in 4m08s and the rest of `assembleDebug` in 3m37s. No build file, repository list, dependency or heap
   setting in the repository was changed for it.
+
+---
+
+## T. Audit findings — 10 November run
+
+The seventeen items open above were re-read against the code before anything new was added, and each
+still fails for the reason already recorded against it: F1, F3 and I8 need one Gradle invocation longer
+than 300 s on this 2-core / 2,098 MB sandbox (`minifyReleaseWithR8`, `lintAnalyzeDebug`; neither resumes
+across a call), G1 and I10 would duplicate numbers their own entries already carry, H2, H5, H7, H9, H11
+and H13 each need a new row, card or copy on a screen, H14 needs codenames the recorded sources do not
+publish, and L2, M2, M3, M4 and P2 each move a value, a percentage or a verdict the user reads. Nothing
+was ticked that was not done. The item below was found by following what happens to a finished scan when
+the store underneath it refuses to be written.
+
+- [x] **T1. A history index that cannot be written threw away a scan that had already finished.**
+  `FileDiagnosticHistory.save` writes two things: the report document, whose failure has been swallowed
+  since B2 so that an unstorable report degrades to "the report cannot be re-opened", and the index
+  entry that lists it — `writeIndex(kept)`, called bare. `AppViewModel.scan` calls `history.save`
+  *inside its own `try` block*, so an exception escaping the index write landed in the scan's
+  `catch (e: Exception)` and published `"Scan failed: …"`: the user was told the scan failed and shown
+  no report at all, although every collector had completed, every score had been computed and the
+  report document was already on disk. The reachable triggers are ordinary ones — a full data
+  partition, an app-private directory made unwritable, or a `history/index.json.tmp` path that cannot
+  be opened — and the failure was silent about its own cause: the message named the index file, not the
+  scan. *Done:* the index write is now `runCatching`, the same shape as the report write beside it, so
+  that store degrades to "this scan is not listed" instead of "this scan did not happen". Pruning stays
+  correct without further change: `kept` is the previous entries plus this one, so it can only be a
+  superset of what the index still on disk points at, and nothing the old index references is removed.
+  The signature of `save`, the entry it returns, the JSON it writes and the order of the writes are all
+  unchanged, and no `ui/` or `res/` file was touched.
+  *Tests:* three in the new `HistoryIndexFailureTest` (Robolectric, `sdk = 34`), using the obstruction
+  `HistoryIndexWriteTest` already establishes — `history/index.json.tmp` made a directory, so the
+  crash-safe write cannot open it: a save whose index cannot be written returns normally and leaves the
+  report document on disk, the index it cannot replace is left exactly as it was (the earlier entry is
+  still listed and still opens) while both documents survive, and a later save with the obstruction
+  cleared writes the index again and prunes the orphaned report. *Not verified:* the end-to-end effect
+  on the UI is asserted at the store, not through `AppViewModel` — driving `scan()` needs a device's
+  collectors, and the claim being tested is precisely that `save` no longer throws, which is the only
+  way the scan's `catch` could be reached. `assembleDebug` and `testDebugUnitTest` both green (see the
+  commit message for the counts); `tools/check-no-ui-change.sh` clean.
 
 ---
 

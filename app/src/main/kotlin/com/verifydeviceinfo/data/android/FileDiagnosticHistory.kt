@@ -60,7 +60,14 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
             val entries = (previous ?: emptyList()).toMutableList()
             entries.add(0, entry)
             val kept = entries.take(MAX_INDEX_ENTRIES)
-            writeIndex(kept)
+            // Best-effort, for the same reason the report write above is: `save` runs inside the
+            // scan's own try block, so an exception escaping here used to discard a scan that had
+            // already finished — the user was told "Scan failed" and got no report at all, because
+            // the one thing that failed was the index entry listing it. A store that cannot take
+            // the index now degrades to "this scan is not listed" instead. Pruning stays correct:
+            // `kept` is the previous entries plus this one, so it can only be a superset of what
+            // the index on disk still points at.
+            runCatching { writeIndex(kept) }
             // Reports that fell out of the index can no longer be opened from the History screen,
             // so drop their files as well; otherwise app-private storage grows without bound.
             runCatching { pruneReports(kept, indexReadable = previous != null) }
