@@ -1476,6 +1476,56 @@ same lens and was implemented in this run.
 
 ---
 
+## P. Audit findings — 9 November run
+
+The sixteen items left open above were re-read against the code before anything new was added, and
+none of them can be finished in this environment. F1, F3 and I8 need one Gradle invocation longer
+than 300 s (`minifyReleaseWithR8`, `lintAnalyzeDebug`; neither is resumable, and this host is still
+2 cores / 2,098 MB). H2, H5, H7, H9, H11, H13, M2, M3 and M4 change a value, a percentage or a
+rendered document; L2 flips a verdict; G1 and I10 would duplicate numbers already recorded next to
+their own items; H14 needs codenames the recorded sources do not publish. So the code was re-read
+with the lens of "When the list runs out". Two findings, the first implemented here.
+
+- [x] **P1. `DefaultIntegrityAnalyzer` — the rules behind the Security screen and the integrity
+  score — had no test.** Every other analysis class has one (`AuthenticityEngineTest`,
+  `ScoreEngineTest`, `PartsProviderTest`, `AgeEstimatorTest`, `AnalysisSupportTest`), but this one
+  appeared in the suite only as a fixture built *around* a report: no test ever called `analyze` or
+  asserted a status. Its ten checks decide what the Security screen lists, what the integrity score
+  reads, and whether the report says "The system software has serious integrity problems", so a
+  changed threshold or a flipped branch was invisible to the suite. *Change:* a new
+  `IntegrityAnalyzerTest`, 16 tests, one per rule plus the aggregate — the check ids and their order
+  (a new check is a UI change, so it must break a test first); root indicators listed once each in
+  the warning; all three bootloader outcomes; `green` only, case-insensitively, with `orange`,
+  `yellow` and absent distinguished; `ro.debuggable` outranking the developer-options setting, ADB
+  alone raising a warning, an unreadable setting staying UNVERIFIED; SELinux `Enforcing` only;
+  patch-age thresholds at one and two years, with an absent, unparsable and truncated date all
+  UNVERIFIED; StrongBox mentioned only when the device reports it; Play Integrity never simulated;
+  installer PASS versus UNVERIFIED; and the aggregate verdict and its summary for clean, one-warning,
+  many-warning and failed reports. *Mutation-checked, not just green:* changing `patchDays > 730` to
+  `> 900` and `contains("encrypted")` to `startsWith("encrypted")` made exactly three tests fail
+  (`patchAgeThresholdsAreOneYearAndTwo`, `encryptionIsJudgedBySubstringAsTheCodeCurrentlyDoes`,
+  `theOverallVerdictAggregatesTheChecks`); the mutations were then reverted and the file is
+  byte-identical to the committed one. *Test-only change:* no production file, no UI, copy, layout,
+  status or reported value touched. `assembleDebug` green; **334** unit tests pass (318 before, 16
+  new); debug APK 9,827,992 bytes, unchanged. Recorded while writing it, and not fixed here: the
+  aggregate's `else -> UNVERIFIED` branch cannot be reached, because the encryption check always
+  returns either VERIFIED or WARNING.
+- [ ] **P2. The encryption check reports an unencrypted volume as VERIFIED.**
+  `DefaultIntegrityAnalyzer` decides the "Storage encryption" check with
+  `security.encryptionState.contains("encrypted", true)`. `vold`/`ro.crypto.state` publish
+  `unencrypted` as well as `encrypted`, and `"unencrypted"` contains `"encrypted"`, so a device whose
+  userdata is not encrypted — a very old build, or one whose crypto state was modified — is shown as
+  VERIFIED with the explanation "Storage reports as 'unencrypted'", and the aggregate verdict and
+  the integrity score move with it. *Change:* compare the state rather than search inside it
+  (`equals("encrypted", ignoreCase = true)`, with `blank`/`unsupported` kept as the warning they
+  already are). *Needs sign-off:* it moves a status the Security screen shows from VERIFIED to
+  WARNING on such a device, and with it the headline and the score — the same kind of change H1, H12,
+  K3 and L2 are waiting on. The current behaviour is pinned by
+  `IntegrityAnalyzerTest.encryptionIsJudgedBySubstringAsTheCodeCurrentlyDoes`, so the fix has to
+  change that assertion deliberately.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
