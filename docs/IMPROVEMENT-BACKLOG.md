@@ -483,6 +483,9 @@ build and tests green before committing.
   *Passed over (9 Nov, second pass):* unchanged — `nproc` = 2, 2,098 MB, and this pass's cold
   `assembleDebug` took eight 300 s calls before it first went green, so the non-resumable
   `minifyReleaseWithR8` again had nowhere to run.
+  *Passed over (11 Nov run):* unchanged — `nproc` = 2, 2,098 MB, and this run's cold `assembleDebug`
+  needed seven 300 s calls before it first went green, so the non-resumable `minifyReleaseWithR8`
+  still has nowhere to run here.
 
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
@@ -534,6 +537,8 @@ build and tests green before committing.
   call on 2 cores, and a half-finished analysis cannot be triaged honestly.
   *Passed over (9 Nov, second pass):* unchanged — same 2 cores, and the cold build alone consumed most of
   this pass's 300 s calls, so the analysis still cannot be finished or triaged honestly.
+  *Passed over (11 Nov run):* unchanged — same 2 cores / 2,098 MB, and this run's cold `assembleDebug`
+  took seven 300 s calls, so a non-resumable `lintAnalyzeDebug` still cannot be finished or triaged.
 
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
@@ -581,6 +586,8 @@ build and tests green before committing.
   L3's own entry, so the duplication argument still holds.
   *Passed over (9 Nov run):* this run's measurement (the wrap layout, Q1) is recorded in Q1's own entry, so
   the duplication argument still holds.
+  *Passed over (11 Nov run):* this run produced no measurement (the change below is an error path, not a
+  timing), so there is still no number without a home in this file.
 
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
@@ -1883,6 +1890,76 @@ on unchanged code, which is a red CI run (I7) that says nothing about the app.
   false-failure path.
 
 ---
+
+## X. Audit findings — 11 November run
+
+The eighteen items left open above were re-read before anything new was added, and none of them can
+be finished in this environment. Blocked by this sandbox (F1, F3, I8): `nproc` = 2 and 2,098 MB again,
+this run's cold `assembleDebug` needed seven 300 s calls, and neither `minifyReleaseWithR8` nor
+`lintAnalyzeDebug` finishes inside one call or resumes across calls. Duplicates of work already
+recorded (G1, I10). Need a visible change (H2, H5, H7, H9, H11, H13, M2, M3, M4). Need data the app
+does not carry (H14). Need sign-off because they move a reported verdict (L2, P2, V2). Nothing was
+ticked that was not done.
+
+So the code was read where the scores come from — the automated diagnostics pass, which turns
+measurements into the results the Hardware and Security scores are built from — and one finding
+cleared the bar. X1 was implemented in this run.
+
+- [x] **X1. `runAutomatedChecks` guarded two of its six checks, so one unreadable service discarded
+  the whole pass — and the class had no test at all.**
+  `AndroidHardwareDiagnosticsEngine.runAutomatedChecks` produces six results (`auto_storage`,
+  `auto_memory`, `auto_thermal`, `auto_camera_enum`, `auto_sensor_liveness`, `charging`). The storage
+  and memory checks were wrapped in `try`/`catch`; the other four read a vendor service bare —
+  `getSystemService(POWER_SERVICE) as PowerManager` followed by `currentThermalStatus`,
+  `cameraManager.cameraIdList`, `SensorProbe.probeLiveness`/`hasSensor`, and
+  `registerReceiver(ACTION_BATTERY_CHANGED)`. An exception from any of them propagated out of the
+  pass, and `AppViewModel.runAutomatedDiagnostics` catches it and replaces the whole run with
+  "Diagnostics failed: …", leaving the session untouched — so one check that could not be read threw
+  away every result the other five had already measured. The class was also the only analysis-sized
+  production file in `data/android` with no test: no test called `runAutomatedChecks` or asserted a
+  status, a threshold or the set of checks it reports, so a dropped check, a reordered one or a
+  changed threshold was invisible to the suite.
+  *Change:* a top-level `internal suspend fun automatedCheck(testId, title, unreadable, block)` runs
+  one check and turns a throw into a single `UNVERIFIED` result whose note reads
+  "Could not read <unreadable>: <message>" — the same shape the storage and memory checks already
+  used, with their notes left byte-identical ("Could not read storage statistics: …",
+  "Could not read memory statistics: …"). `CancellationException` is rethrown, so a superseded run
+  still unwinds instead of reporting a refusal. All six checks now go through it; every status,
+  measurement, note and result order on a device where the checks work is unchanged, including the
+  pre-API-29 `NOT_SUPPORTED` thermal row and the `0 camera module(s) reported` row a device with no
+  camera service produces. One deliberate difference, and only on a path that throws: the camera
+  check caught a throwing `cameraIdList` itself and reported **FAILED** with "no modules … a strong
+  indicator of a hardware fault" — a verdict about the hardware drawn from an exception rather than
+  from a measurement. It now reports **UNVERIFIED** with the reason, like the other five, so nothing
+  is called a fault that was not measured. No file under `ui/` or `res/` is touched: nothing on
+  screen changes on any path that works today, and the only differences are on paths that used to
+  lose the whole pass or to accuse the hardware of a fault it never reported.
+  *Tests:* 11 in the new `AutomatedChecksTest` (Robolectric, API 34). Eight pin the pass itself: the six
+  check ids and their order; every result carrying a title and either a measurement or an
+  explanation; storage and memory reporting `N% free (X of Y)`; thermal mapping `THERMAL_STATUS_NONE`
+  to PASS with "No throttling"; camera enumeration failing exactly when the reported count is zero;
+  accelerometer liveness never passing without a vector and never measuring one when it does not
+  pass; charging unverified exactly when the broadcast carries no temperature, and always naming the
+  power source. The eleventh is the finding itself, driven end to end: a `Context` whose
+  `getSystemService(POWER_SERVICE)` throws now yields all six results with the thermal row UNVERIFIED
+  and the note "Could not read the thermal state: power service unavailable", while storage and
+  memory still carry their measurements. That test cannot pass on the previous code — the exception
+  escaped the pass there — so it is the regression test for this item. Two further tests pin the
+  helper directly: a throwing block becomes an UNVERIFIED row, and a successful one is returned
+  unchanged (`assertSame`).
+  *Not verified:* no device is available, so the platform branches Robolectric does not model are
+  pinned by fixture rather than by a real handset: its sensor list has no accelerometer, so the
+  accelerometer **PASS** branch (and the `x=… y=… z=… m/s²` measurement it asserts) is not exercised;
+  its camera list is empty, so the camera **PASS** branch is not exercised either; and the thermal
+  **WARNING**/**FAILED** thresholds (MODERATE and above) are verified by inspection only, and the
+  changed camera path (a `cameraIdList` that throws) is covered by the helper tests but not driven
+  end to end. The isolation itself is verified for one service (the power service) end to end and
+  for the helper directly; the other three bare reads are now inside the same helper by
+  construction.
+  `assembleDebug` green; **372** unit tests pass (361 before, 11 new);
+  `tools/check-no-ui-change.sh` clean — the diff is one modified production file, one new test file
+  and this entry. Debug APK 9,900,073 bytes, with no size claim: the debug APK is not byte-reproducible
+  on this toolchain (recorded under J1/J2), and no pre-change baseline was rebuilt this run.
 
 ## When the list runs out
 
