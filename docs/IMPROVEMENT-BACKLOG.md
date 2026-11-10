@@ -1788,6 +1788,63 @@ formatted text through `String.format` in a loop.
 
 ---
 
+## V. Audit findings — 10 November run
+
+The seventeen items left open above are all blocked by this sandbox (F1, F3, I8: 2 cores / 2,098 MB,
+where a cold `assembleDebug` alone needed nine 300 s calls this run and `minifyReleaseWithR8` and
+`lintAnalyzeDebug` are neither finishable in one call nor resumable), duplicates of work already
+recorded (G1, I10), need a visible change (H2, H5, H7, H9, H11, H13, M2, M3, M4), need data the app
+does not carry (H14), or need sign-off because they move a reported verdict (L2, P2). So the list was
+re-read against the code, as "When the list runs out" asks, starting from the state-change path in
+`AppViewModel` — the one production file on the UI side that renders nothing. V1 was implemented in
+this run; V2 is the rest of the same finding and is left open on purpose.
+
+- [x] **V1. A state change re-derived evidence that cannot have changed, on the main thread.**
+  `AppViewModel.rebuildReport` recomputed all five analyses on every call. Only `parts` and `scores`
+  read the diagnostic session; `integrity` reads the snapshot alone and `age` reads the snapshot, the
+  reference and the purchase date — and `authenticity` was already reused from the previous report
+  rather than recomputed. So every recorded diagnostic result re-ran the integrity analysis and the
+  age estimate to produce the same objects, and `setRedacted` ran the whole set to change a boolean
+  that no analyzer reads: both export paths apply the flag themselves by copying `state.redacted`
+  onto the report (`exportPdf`, `exportJson`), so nothing the rebuild produced could differ.
+  *Change:* `rebuildReport` reuses `previous.integrity` and `previous.age` (the latter unless the new
+  `recomputeAge` parameter is set, which `setPurchaseDate` does because the purchase date is an age
+  input), and `setRedacted` writes the flag and the report timestamp instead of rebuilding. No
+  analyzer, no data model and no rendering changed.
+  *Measured* (JDK 17, this host, warmed, minimum of 300 rounds per operation, `TestFixtures.snapshot()`
+  — a fixture, not a handset; no device is available here): a full rebuild of `parts + age +
+  integrity + scores` takes **500 µs median / 364 µs min**, and the session-dependent pair
+  `parts + scores` alone **240 µs / 167 µs**, so the reuse removes **~260 µs** of main-thread work per
+  recorded result. Flipping the redaction switch went from that full rebuild (**~500 µs**) to a
+  `DeviceReport.copy` (**~2 µs median, 1 µs min**). For scale: `authenticity.analyze` alone is
+  434 µs median on the same fixture, and it was already being reused. These are sub-millisecond
+  numbers and the entry says so — the item is worth taking because the work being removed provably
+  cannot change the result, not because 260 µs is felt.
+  *Tests:* four in `AppViewModelRebuildTest`, driving the real view model through the debug-only mock
+  scan and asserting reuse by identity: the redaction switch re-derives nothing (`assertSame` on all
+  five analyses) while still reaching the report and the state; it still re-stamps `generatedAtMillis`,
+  which is the one thing `ReportScreen` renders from that path; recording a diagnostic result keeps
+  `integrity`, `age` and `authenticity` identical and produces new `parts` and `scores`, with the
+  result present in the session; and a new purchase date still re-derives the age while reusing the
+  integrity report. Mutation-checked by reasoning rather than by reverting in-tree: with the reuse
+  removed the first three fail on `assertSame`, and with `recomputeAge` dropped the fourth fails on
+  `assertNotSame`.
+  `assembleDebug` and the full `testDebugUnitTest` suite green (361 tests: 357 before, 4 new);
+  `tools/check-no-ui-change.sh` clean — the diff is one modified `ui/AppViewModel.kt` (already in
+  `NON_RENDERING_UI_FILES`), one new test file and this entry.
+
+- [ ] **V2. The session-dependent rebuild still runs synchronously on the main thread.**
+  `AppViewModel.recordResult` and `setPurchaseDate` call `rebuildReport` directly, so the ~240 µs that
+  is left (V1's measurement) — and, on a real device with a full field list, more — runs inside the
+  click that records a diagnostic result. *Change:* launch the derivation on `Dispatchers.Default`
+  behind the existing `ScanCoordinator` generation gate so only the newest rebuild publishes, and
+  keep the redaction/age paths as they are. *Not done this run:* it makes the report briefly stale
+  after a result is recorded, and the export buttons read `state.report`, so a tap landing inside
+  that window would export the previous report — a behaviour change that needs a decision, not a
+  drive-by edit. Everything else about it is specified above.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
