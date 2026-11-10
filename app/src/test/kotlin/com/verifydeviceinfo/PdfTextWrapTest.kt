@@ -4,6 +4,8 @@ import com.verifydeviceinfo.data.android.wrapText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Collections
+import java.util.IdentityHashMap
 
 /**
  * The report's word wrap.
@@ -210,41 +212,45 @@ class PdfTextWrapTest {
         assertTrue(wrapText("   ", 100f) { it.length * 6f }.isEmpty())
     }
 
+    /**
+     * The property this item was about: a word must not cost a copy of the whole line.
+     *
+     * The previous wrap handed the measurer a freshly built `String` for every word (`"$current
+     * $word"`, then copied again into a new `StringBuilder`); the current one appends to a single
+     * `StringBuilder` and measures that same object in place. Counting the distinct `CharSequence`
+     * instances the measurer receives pins that difference exactly, and deterministically: one
+     * object for the whole paragraph now, one per word before.
+     *
+     * This replaces a wall-clock comparison (`after < before`, best of five rounds of a
+     * micro-benchmark) that measured the host rather than the code. It failed on unchanged sources
+     * on a loaded two-core machine — `before=8,670,042ns after=15,127,214ns` — minutes after passing
+     * on the same build, which is a false red in CI, not a regression. Every line the wrap produces
+     * is still pinned character for character by the equality tests above, so nothing that test
+     * asserted about the output is lost with it.
+     */
     @Test
-    fun `laying out a report's worth of paragraphs is faster than the copies it replaced`() {
-        // A report is a few hundred short lines plus a handful of long ones. The old wrap builds
-        // and throws away one String and one StringBuilder copy of the line per word, so this is
-        // where that shows up as time as well as garbage.
-        val paragraphs = List(300) { corpus[0] } + List(50) { corpus[9] } + listOf(corpus[6])
-        val measure: (CharSequence) -> Float = { it.length * 6f }
-
-        fun bestOf(rounds: Int, run: () -> Unit): Long {
-            var best = Long.MAX_VALUE
-            repeat(rounds) {
-                val started = System.nanoTime()
-                run()
-                best = minOf(best, System.nanoTime() - started)
-            }
-            return best
+    fun `the wrap measures one growing line instead of a fresh copy per word`() {
+        for (text in listOf(corpus[0], corpus[9], corpus[6])) {
+            val label = "text='${text.take(40)}'"
+            assertEquals(
+                "$label: the copy-free wrap measures the one line it is building",
+                1,
+                distinctMeasuredObjects { measure -> wrapText(text, 515f, measure) }
+            )
+            assertTrue(
+                "$label: the previous wrap built a new candidate string per word",
+                distinctMeasuredObjects { measure -> previousWrap(text, 515f, measure) } > 1
+            )
         }
+    }
 
-        val old = { paragraphs.forEach { previousWrap(it, 515f, measure) } }
-        val new = { paragraphs.forEach { wrapText(it, 515f, measure) } }
-
-        // Warm both paths: the first rounds are class loading and the interpreter, not layout.
-        repeat(5) { old(); new() }
-
-        val before = bestOf(5, old)
-        val after = bestOf(5, new)
-        println("wrap layout over ${paragraphs.size} paragraphs: before=${before / 1000}us after=${after / 1000}us")
-
-        assertEquals(
-            paragraphs.map { previousWrap(it, 515f, measure) },
-            paragraphs.map { wrapText(it, 515f, measure) }
-        )
-        assertTrue(
-            "expected the copy-free wrap to be faster, before=${before}ns after=${after}ns",
-            after < before
-        )
+    /** How many different objects the wrap handed to [measure] for one paragraph. */
+    private fun distinctMeasuredObjects(run: ((CharSequence) -> Float) -> List<String>): Int {
+        val seen = Collections.newSetFromMap(IdentityHashMap<CharSequence, Boolean>())
+        run { line ->
+            seen.add(line)
+            line.length * 6f
+        }
+        return seen.size
     }
 }

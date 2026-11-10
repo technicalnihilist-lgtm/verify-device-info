@@ -1845,6 +1845,45 @@ this run; V2 is the rest of the same finding and is left open on purpose.
 
 ---
 
+## W. Audit findings — 10 November run
+
+The seventeen items left open above are all blocked here, for the same reasons the last four runs
+recorded. Blocked by this sandbox (F1, F3, I8): `nproc` = 2 and 2,098 MB again; this run's cold
+`assembleDebug` needed five 300 s calls and `:app:mergeExtDexDebug` alone took 3m37s with a warm
+configuration cache, and neither `minifyReleaseWithR8` nor `lintAnalyzeDebug` can finish inside one
+call or resume across calls. Duplicates of work already recorded (G1, I10): the release runtime
+classpath was re-measured this run and holds nothing unexpected — the Compose stack dominates the
+pre-dex input (`ui` 5,030,805 B, `material3` 4,965,333 B, `foundation` 4,842,790 B, `runtime`
+2,415,632 B), followed by `kotlin-stdlib` 1,747,660 B and `kotlinx-coroutines-core` 1,463,587 B, and
+no test or tooling artefact (`robolectric`, `ui-test-junit4`, `ui-tooling`) appears in it at all.
+Need a visible change (H2, H5, H7, H9, H11, H13, M2, M3, M4). Need data the app does not carry
+(H14). Need sign-off because they move a reported verdict (L2, P2, V2).
+
+So the suite itself was read instead, and one finding cleared the bar: a regression test that fails
+on unchanged code, which is a red CI run (I7) that says nothing about the app.
+
+- [x] **W1. The PDF wrap regression test decides its verdict with a wall-clock race.**
+  `PdfTextWrapTest`'s last test (`laying out a report's worth of paragraphs is faster than the copies
+  it replaced`) timed two micro-benchmarks — 351 paragraphs laid out by the old wrap and by the new
+  one, five warm-up passes and a best-of-five each — and asserted `after < before` with no margin.
+  It measures the host, not the code: **the same unchanged sources failed it in this run**
+  (`before=8,670,042ns after=15,127,214ns`, the copy-free wrap "slower" by 1.7×) minutes after
+  passing it on the same build on the same two-core machine. *Done:* the timing comparison is
+  replaced by a deterministic one that pins the property the item existed for — a word must not cost
+  a copy of the whole line. The measurer now records the *identity* of every `CharSequence` it is
+  handed: the current wrap measures the single `StringBuilder` it appends into (1 distinct object per
+  paragraph), while the previous wrap built `"$current $word"` per word (>1 distinct objects), so the
+  assertion holds by construction on any machine and at any load. Nothing about the output is lost:
+  every line is still compared character for character against both reference implementations by the
+  equality tests above, and the measurement-count test still pins that no extra work reaches the
+  paint. The 15 benchmark passes over 351 paragraphs are gone from the suite as well. Test count
+  unchanged (361, one test replaced by one test); `assembleDebug` green and all 361 unit tests pass
+  in this run, `tools/check-no-ui-change.sh` untouched (test sources only).
+  *Not claimed:* no change in wrapping behaviour, and none intended — this commit only removes a
+  false-failure path.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
