@@ -15,6 +15,7 @@ import com.verifydeviceinfo.core.model.SecurityFacts
 import com.verifydeviceinfo.core.model.SpecField
 import com.verifydeviceinfo.core.model.SpecGroup
 import com.verifydeviceinfo.core.model.Verification
+import com.verifydeviceinfo.core.util.Formatters
 import com.verifydeviceinfo.data.android.SystemPropertyReader
 import java.io.File
 import java.security.KeyStore
@@ -385,8 +386,7 @@ class SecurityCollector(
             info.signatures?.firstOrNull()
         }
         signature?.toByteArray()?.let {
-            MessageDigest.getInstance("SHA-256").digest(it)
-                .joinToString(":") { byte -> "%02X".format(byte) }
+            Formatters.hexColon(MessageDigest.getInstance("SHA-256").digest(it))
         }
     } catch (e: Exception) {
         null

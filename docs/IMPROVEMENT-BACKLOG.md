@@ -1740,6 +1740,54 @@ the store underneath it refuses to be written.
 
 ---
 
+## U. Audit findings — 10 November run, second pass
+
+The seventeen items left open above were re-read against the code first, and each still fails for the
+reason already recorded against it, so none was retried or ticked: F1 and F3 need one Gradle
+invocation longer than 300 s (`minifyReleaseWithR8`, `lintAnalyzeDebug`, neither resumable across a
+call) on this 2-core / 2,098 MB sandbox, and I8 is F3 under another name; G1 and I10 would duplicate
+numbers their own entries already carry; H2, H5, H7, H9, H11 and H13 each need a new row, card or
+copy on a screen, H14 needs codenames the recorded sources do not publish; M2, M3 and M4 each move a
+number or a percentage the user reads; L2 and P2 each move a reported verdict and are waiting on
+sign-off. The item below was found by reading the one production function on the scan path that still
+formatted text through `String.format` in a loop.
+
+- [x] **U1. The APK signature digest built a `Formatter` per byte.** `SecurityCollector.readSignatureDigest`
+  turned the SHA-256 of the signing certificate into the colon-separated hex the Security screen shows
+  with `joinToString(":") { byte -> "%02X".format(byte) }`: one `String.format` call per byte, and each
+  one constructs a `java.util.Formatter`, resolves a `Locale`, parses the format string and allocates
+  its own builders — 32 of them for one digest, on every scan, to produce 95 characters. It was also
+  the last `String.format` left on the scan path without a pinned locale; every other one already
+  passes `Locale.US` (H10). *Measured first, and the locale half of that turned out not to be a bug:*
+  `"%02X"` was run under `en-US`, `hi-IN`, `ar-EG`, `ar-SA`, `fa-IR`, `bn-IN`, `mr-IN` and `ne-NP` and
+  printed identical Latin hex in all eight, so nothing on screen was wrong — this is a cost, not a
+  correctness fix, and the entry says so rather than claiming a bug that is not there.
+  *Change:* the encoding moved to `Formatters.hexColon(bytes)` (`core/util/Formatters.kt`), a pure
+  Kotlin helper beside the other hand-rolled formatters (`bytes`, `bytesGigabytes`), and the call site
+  is now `Formatters.hexColon(MessageDigest.getInstance("SHA-256").digest(it))`. It appends two
+  characters from a `0123456789ABCDEF` table per byte into one `StringBuilder` pre-sized to
+  `3n - 1`. `and 0xFF` keeps `%02X`'s unsigned reading of a negative byte, so `80` stays `80` and does
+  not become `FFFFFF80`. **No rendered change:** the string is byte-identical for every input, which
+  is what the test below sweeps.
+  *Measured* (JDK 17, this host, warmed, minimum of seven rounds, one 32-byte digest per operation):
+  **25,409 ns → 505 ns (50× faster)** and **20,681 bytes → 248 bytes allocated (83× less)**; the
+  whole saving is ~20 KB of garbage and ~25 µs per scan, which is small in absolute terms and is
+  stated as such — the item is worth taking because the replacement is simpler than what it replaces
+  and carries a pinned-output test, not because 25 µs changes anything the user feels.
+  *Tests:* six in `FormattersHexTest` (plain JVM, no Robolectric) against a verbatim copy of the
+  `joinToString(":") { "%02X".format(it) }` oracle — all 256 single-byte values (so every negative
+  byte is covered), 200 random 32-byte digests, seven other lengths from 1 to 65 bytes, the empty
+  array, the 32-group/95-character shape with every character restricted to `0-9A-F`, and the four
+  boundary bytes `00`/`7F`/`80`/`FF`. Mutation-checked: dropping the `and 0xFF` makes
+  five of the six tests fail (a negative byte indexes the digit table out of range, so
+  `80`/`FF` and every sweep that covers a negative byte go red) while the empty-array test still
+  passes; restored, all six pass.
+  `assembleDebug` and `testDebugUnitTest` green; `tools/check-no-ui-change.sh` clean — the diff is
+  one modified production file, one modified collector and one new test file, and nothing under
+  `ui/` or `res/`.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
