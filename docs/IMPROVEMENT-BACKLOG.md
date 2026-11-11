@@ -1961,6 +1961,67 @@ cleared the bar. X1 was implemented in this run.
   and this entry. Debug APK 9,900,073 bytes, with no size claim: the debug APK is not byte-reproducible
   on this toolchain (recorded under J1/J2), and no pre-change baseline was rebuilt this run.
 
+## Y. Audit findings — 11 November run, second pass
+
+The eighteen open items above were re-read before anything new was added, and the answer had not
+changed. Blocked by this sandbox: F1 and F3 (2 cores / 2,098 MB; neither `minifyReleaseWithR8` nor
+`lintAnalyzeDebug` finishes inside one 300 s call or resumes across calls), and I8 with them.
+Duplicates of numbers already recorded next to their items: G1, I10. Would change what the user reads
+on screen or in the exported report: H2, H5, H7, H9, H11, H13, M2, M3, M4. Needs reference data the
+app does not carry: H14. Moves a reported verdict and needs sign-off: L2, P2, V2. Nothing was ticked
+that was not done.
+
+*Environment note for the rest of the window (not a repository change):* this sandbox's cold
+`assembleDebug` had been failing to finish inside a single 300 s call on every attempt today, so the
+build was the blocker before any item was. It fits now, at **4m 33s**, once `org.gradle.jvmargs` in
+`$GRADLE_USER_HOME/gradle.properties` is
+`-Xmx1200m -XX:MaxMetaspaceSize=512m -XX:TieredStopAtLevel=1 -XX:+UseParallelGC -XX:ReservedCodeCacheSize=96m`.
+The `TieredStopAtLevel=1` is what buys the time: the build daemon is single-use, so C1-only JIT
+removes most of the JIT cost from a JVM that runs one compile and exits. Keep the argument set
+*identical* between calls — passing a different `-Dorg.gradle.jvmargs` on the command line invalidates
+the configuration cache and costs ~200 s of reconfiguration, which is most of a call.
+
+So the code was read again along the path a scan actually walks — the collectors that turn framework
+calls into `SpecField` rows — and one finding cleared the bar.
+
+- [x] **Y1. Three connectivity blocks re-emitted a key and discarded rows they had already read.**
+  `ConnectivityCollector` builds the connectivity section as independent rows, but three of its
+  blocks read several values inside one `try`: Bluetooth state plus adapter name, the active
+  network's transport plus its internet capability, and the telephony block's SIM state, operator
+  name and phone type. A throw from the second read did two things at once. The enclosing `catch`
+  replaced the whole block with one "Unreadable" row, so a value that had been read successfully
+  (the SIM state, the active transport, the Bluetooth state) was thrown away; and it re-emitted a key
+  that was already in the list, so the snapshot carried the same `SpecField` key twice and the JSON
+  export listed two different values for one property, one of them a measurement and one of them a
+  failure. The telephony block could reach this on a device whose operator-name or phone-type read
+  is refused, and the network block on a device whose `hasCapability` throws.
+  *Change:* a small `Reading`/`attempt` helper (`internal`, top level in the same file) runs one
+  framework read and returns either the value or the exception, so a failure costs the one row it
+  belongs to. The three blocks now read each value through it and emit each key from exactly one
+  branch, which makes a duplicate key structurally impossible. Rows that worked are unchanged: the
+  same label, group, source, confidence, status and value as before, and the same failure notes
+  ("Unreadable: …", and the existing "Requires the Nearby devices permission …" and
+  "Wi-Fi state unreadable: …" wording) on the paths that throw. No file under `ui/` or `res/` is
+  touched, so nothing on screen changes on any path that works today.
+  *Tests:* 7 in the new `ConnectivityCollectorTest` (Robolectric, API 34). Four pin the helper: a
+  successful read carries no failure; a throwing read becomes a `Reading` instead of escaping; a read
+  that returns null is *not* a failure, because "the platform has no value" and "the platform
+  refused" have to stay distinguishable; and the failure note keeps the wording the blocks already
+  used. Three pin the section itself: no field key is emitted twice; the expected sixteen rows are
+  each present; and any row with no value is `UNVERIFIED` rather than a measurement. The
+  duplicate-key test fails on the previous code for a throwing read but not on a working device,
+  which is the point of the item — the defect was on a path, not in the normal output.
+  *Not verified:* no device is available, so the throwing paths themselves are not driven end to end.
+  Robolectric's `TelephonyManager` does not throw, and a `Context` wrapper cannot substitute a
+  `TelephonyManager` whose `getNetworkOperatorName` refuses, so the three re-emitted-key paths are
+  verified by construction (each key now has exactly one emitting branch) and by the helper's tests
+  rather than by a test that makes the framework call throw.
+  `assembleDebug` green; **379** unit tests pass (372 before, 7 new);
+  `tools/check-no-ui-change.sh` clean — the diff is one modified production file, one new test file
+  and this entry. Debug APK 9,827,992 bytes, with no size claim: the debug APK is not byte-reproducible
+  on this toolchain, and the 9,900,073-byte figure recorded under X1 is a different build of a
+  different commit.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

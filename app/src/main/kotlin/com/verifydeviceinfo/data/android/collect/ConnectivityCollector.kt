@@ -86,7 +86,7 @@ class ConnectivityCollector(private val context: Context) {
                         note = "Requires the Nearby devices permission on Android 12 and newer.")
                 }
                 fields += FieldBuilder.value("net.bluetoothName", "Bluetooth adapter name",
-                    try { adapter.name } catch (e: SecurityException) { null },
+                    attempt { adapter.name }.value,
                     SpecGroup.CONNECTIVITY, "BluetoothAdapter.getName()", Confidence.MEDIUM,
                     sensitive = true)
             }
@@ -124,10 +124,18 @@ class ConnectivityCollector(private val context: Context) {
             fields += FieldBuilder.value("net.activeTransport", "Active connection",
                 transports.joinToString(", ").ifBlank { "None" }, SpecGroup.CONNECTIVITY,
                 "ConnectivityManager.NetworkCapabilities")
-            fields += FieldBuilder.value("net.internetCapable", "Internet capability",
-                if (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true)
-                    "Yes" else "No",
-                SpecGroup.CONNECTIVITY, "NetworkCapabilities.NET_CAPABILITY_INTERNET", Confidence.MEDIUM)
+            val internetCapable = attempt {
+                capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            }
+            fields += if (internetCapable.failure != null) {
+                FieldBuilder.value("net.internetCapable", "Internet capability", null,
+                    SpecGroup.CONNECTIVITY, "NetworkCapabilities.NET_CAPABILITY_INTERNET",
+                    Confidence.MEDIUM, note = unreadableNote(internetCapable.failure))
+            } else {
+                FieldBuilder.value("net.internetCapable", "Internet capability",
+                    if (internetCapable.value == true) "Yes" else "No",
+                    SpecGroup.CONNECTIVITY, "NetworkCapabilities.NET_CAPABILITY_INTERNET", Confidence.MEDIUM)
+            }
         } catch (e: Exception) {
             fields += FieldBuilder.value("net.activeTransport", "Active connection", null,
                 SpecGroup.CONNECTIVITY, "ConnectivityManager", note = "Unreadable: ${e.message}")
@@ -137,28 +145,51 @@ class ConnectivityCollector(private val context: Context) {
         try {
             val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
             if (tm != null) {
-                val simState = when (tm.simState) {
-                    TelephonyManager.SIM_STATE_READY -> "Ready"
-                    TelephonyManager.SIM_STATE_ABSENT -> "Absent"
-                    TelephonyManager.SIM_STATE_PIN_REQUIRED -> "PIN required"
-                    TelephonyManager.SIM_STATE_PUK_REQUIRED -> "PUK required"
-                    TelephonyManager.SIM_STATE_NETWORK_LOCKED -> "Network locked"
-                    TelephonyManager.SIM_STATE_UNKNOWN -> "Unknown"
-                    else -> "State ${tm.simState}"
+                val simStateRead = attempt { tm.simState }
+                val simState = simStateRead.value?.let { state ->
+                    when (state) {
+                        TelephonyManager.SIM_STATE_READY -> "Ready"
+                        TelephonyManager.SIM_STATE_ABSENT -> "Absent"
+                        TelephonyManager.SIM_STATE_PIN_REQUIRED -> "PIN required"
+                        TelephonyManager.SIM_STATE_PUK_REQUIRED -> "PUK required"
+                        TelephonyManager.SIM_STATE_NETWORK_LOCKED -> "Network locked"
+                        TelephonyManager.SIM_STATE_UNKNOWN -> "Unknown"
+                        else -> "State $state"
+                    }
                 }
-                fields += FieldBuilder.value("net.simState", "SIM state", simState,
-                    SpecGroup.CONNECTIVITY, "TelephonyManager.getSimState()")
-                fields += FieldBuilder.value("net.operator", "Network operator",
-                    tm.networkOperatorName?.takeIf { it.isNotBlank() }, SpecGroup.CONNECTIVITY,
-                    "TelephonyManager.getNetworkOperatorName()")
-                fields += FieldBuilder.value("net.phoneType", "Phone type",
-                    when (tm.phoneType) {
-                        TelephonyManager.PHONE_TYPE_GSM -> "GSM"
-                        TelephonyManager.PHONE_TYPE_CDMA -> "CDMA"
-                        TelephonyManager.PHONE_TYPE_SIP -> "SIP"
-                        TelephonyManager.PHONE_TYPE_NONE -> "None"
-                        else -> "Unknown"
-                    }, SpecGroup.CONNECTIVITY, "TelephonyManager.getPhoneType()")
+                fields += if (simStateRead.failure != null) {
+                    FieldBuilder.value("net.simState", "SIM state", null,
+                        SpecGroup.CONNECTIVITY, "TelephonyManager.getSimState()",
+                        note = unreadableNote(simStateRead.failure))
+                } else {
+                    FieldBuilder.value("net.simState", "SIM state", simState,
+                        SpecGroup.CONNECTIVITY, "TelephonyManager.getSimState()")
+                }
+                val operatorRead = attempt { tm.networkOperatorName }
+                fields += if (operatorRead.failure != null) {
+                    FieldBuilder.value("net.operator", "Network operator", null,
+                        SpecGroup.CONNECTIVITY, "TelephonyManager.getNetworkOperatorName()",
+                        note = unreadableNote(operatorRead.failure))
+                } else {
+                    FieldBuilder.value("net.operator", "Network operator",
+                        operatorRead.value?.takeIf { it.isNotBlank() }, SpecGroup.CONNECTIVITY,
+                        "TelephonyManager.getNetworkOperatorName()")
+                }
+                val phoneTypeRead = attempt { tm.phoneType }
+                fields += if (phoneTypeRead.failure != null) {
+                    FieldBuilder.value("net.phoneType", "Phone type", null,
+                        SpecGroup.CONNECTIVITY, "TelephonyManager.getPhoneType()",
+                        note = unreadableNote(phoneTypeRead.failure))
+                } else {
+                    FieldBuilder.value("net.phoneType", "Phone type",
+                        when (phoneTypeRead.value) {
+                            TelephonyManager.PHONE_TYPE_GSM -> "GSM"
+                            TelephonyManager.PHONE_TYPE_CDMA -> "CDMA"
+                            TelephonyManager.PHONE_TYPE_SIP -> "SIP"
+                            TelephonyManager.PHONE_TYPE_NONE -> "None"
+                            else -> "Unknown"
+                        }, SpecGroup.CONNECTIVITY, "TelephonyManager.getPhoneType()")
+                }
                 fields += if (Build.VERSION.SDK_INT >= 30) {
                     FieldBuilder.value("net.radioType", "Data network type", null,
                         SpecGroup.CONNECTIVITY, "TelephonyManager.getDataNetworkType()",
@@ -206,3 +237,26 @@ class ConnectivityCollector(private val context: Context) {
         )
     }
 }
+
+/**
+ * One optional framework read: the value it produced, or the exception that stopped it.
+ *
+ * The connectivity section is a list of independent rows, but three of its blocks read several
+ * values inside one `try`. A throw in the middle of such a block used to cost everything it had
+ * already read — the enclosing `catch` replaced the whole block with one "Unreadable" row — and it
+ * re-emitted a key that had already been added, so the snapshot carried the same [SpecField] key
+ * twice and the export listed two different values for one property. Reading one value at a time
+ * through [attempt] keeps the rows that did work and makes a duplicate key impossible, because each
+ * key is now emitted exactly once, by the branch that owns it.
+ */
+internal class Reading<out T>(val value: T?, val failure: Exception?)
+
+/** Runs [block], turning any exception into a [Reading] that carries the reason instead. */
+internal inline fun <T> attempt(block: () -> T): Reading<T> = try {
+    Reading(block(), null)
+} catch (e: Exception) {
+    Reading(null, e)
+}
+
+/** The note a row carries when its read failed, in the wording the blocks already used. */
+internal fun unreadableNote(failure: Exception): String = "Unreadable: ${failure.message}"
