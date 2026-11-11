@@ -211,16 +211,21 @@ class ConnectivityCollector(private val context: Context) {
         // Location providers (capability only, no location fix).
         try {
             val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-            val enabled = lm?.let {
-                listOfNotNull(
-                    "GPS".takeIf { _ -> it.isProviderEnabled(LocationManager.GPS_PROVIDER) },
-                    "Network".takeIf { _ -> it.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }
-                )
-            }.orEmpty()
+            // Read one provider at a time. `isProviderEnabled` throws IllegalArgumentException for a
+            // provider the platform does not publish — a TV box has no GPS provider — and the two
+            // reads used to sit inside one `listOfNotNull`, so the absent provider's exception took
+            // the other provider's reading with it and labelled the whole row unreadable. See
+            // [locationProviderRow].
+            val gps = if (lm == null) Reading<Boolean>(null, null) else attempt {
+                lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            }
+            val network = if (lm == null) Reading<Boolean>(null, null) else attempt {
+                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            }
+            val row = locationProviderRow(gps, network)
             fields += FieldBuilder.value("net.locationProviders", "Enabled location providers",
-                if (enabled.isEmpty()) "None enabled" else enabled.joinToString(", "),
-                SpecGroup.CONNECTIVITY, "LocationManager.isProviderEnabled()",
-                note = "Capability only — no location is read or stored.")
+                row.value, SpecGroup.CONNECTIVITY, "LocationManager.isProviderEnabled()",
+                note = row.note ?: "Capability only — no location is read or stored.")
         } catch (e: Exception) {
             fields += FieldBuilder.value("net.locationProviders", "Enabled location providers", null,
                 SpecGroup.CONNECTIVITY, "LocationManager", note = "Unreadable: ${e.message}")
@@ -260,3 +265,33 @@ internal inline fun <T> attempt(block: () -> T): Reading<T> = try {
 
 /** The note a row carries when its read failed, in the wording the blocks already used. */
 internal fun unreadableNote(failure: Exception): String = "Unreadable: ${failure.message}"
+
+/** A row's rendered value and, when it could not be measured, the note that says why. */
+internal class ProviderRow(val value: String?, val note: String?)
+
+/**
+ * The "Enabled location providers" row, from the GPS and network provider reads.
+ *
+ * `LocationManager.isProviderEnabled` throws `IllegalArgumentException` when the platform does not
+ * publish the provider at all — a device with no GNSS, such as a TV box or a set-top box, has no
+ * `gps` provider. The two reads used to share one `listOfNotNull`, so that throw discarded the
+ * other provider's answer as well and the whole row became "Unreadable", even when the network
+ * provider had been read successfully and was enabled. That is the same "a block that throws costs
+ * the rows it had already read" fault the other connectivity blocks were fixed for; this row is the
+ * last one that could still lose a reading.
+ *
+ * A provider that was read decides the value. A provider that threw contributes nothing, and when
+ * neither provider reports enabled the row only says "None enabled" if both reads actually
+ * happened: with one unread the state of that provider is unknown, so the row reports the failure
+ * instead of a measurement it never took. Every case the row could already render renders the same
+ * text as before; only a reading that used to be thrown away is now reported.
+ */
+internal fun locationProviderRow(gps: Reading<Boolean>, network: Reading<Boolean>): ProviderRow {
+    val enabled = listOfNotNull(
+        "GPS".takeIf { gps.value == true },
+        "Network".takeIf { network.value == true }
+    )
+    if (enabled.isNotEmpty()) return ProviderRow(enabled.joinToString(", "), null)
+    val failure = gps.failure ?: network.failure
+    return if (failure == null) ProviderRow("None enabled", null) else ProviderRow(null, unreadableNote(failure))
+}

@@ -489,6 +489,10 @@ build and tests green before committing.
   *Passed over (11 Nov, third pass):* unchanged — `nproc` = 2, 2,098 MB, and this run's cold
   `assembleDebug` needed four 300 s calls before it went green, so the non-resumable
   `minifyReleaseWithR8` still has nowhere to run here.
+  *Passed over (12 Nov run):* unchanged — `nproc` = 2, 2,098 MB. This run's cold `assembleDebug`
+  needed six 300 s calls before it went green (and `testDebugUnitTest` needed three more), so a task
+  that has to finish inside one call and restarts from zero when it is killed still has no window
+  here. Not retried again for the same reason as the three attempts on 7-8 November.
 
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
@@ -2248,6 +2252,36 @@ to be pre-fetched (`ROBOLECTRIC_DEPENDENCY_DIR`; jars for API 29, 30, 33, 34 and
 requests from `maven-central.storage-download.googleapis.com` because `repo1.maven.org` answers 429),
 and `org.robolectric:nativeruntime-dist-compat:1.0.16` plus its POM had to be served from a local file
 repository through a sandbox-only init script. No build file, repository list or dependency changed.
+
+## DD. Audit findings — 12 November run, seventh pass
+
+The list was re-read first. **F1** is still blocked by this host (recorded against it above); **F3**
+and **I8** are the same `lintAnalyzeDebug` task on the same non-resumable footing; **G1** and **I10**
+duplicate measurements already recorded next to their items; **H2, H5, H7, H9, H11, H13, H14, M2,
+M3, M4** need a visible change (a rendered value, a new row, a re-flowed PDF or a progress count);
+**L2, P2, V2** move a reported verdict or make the report briefly stale and need sign-off. That left
+the audit below, which is implemented in this run.
+
+- [x] **DD1. The "Enabled location providers" row still loses a reading it had already taken.**
+  `ConnectivityCollector` reads the location row with one `listOfNotNull` over two
+  `LocationManager.isProviderEnabled` calls. That method throws `IllegalArgumentException` for a
+  provider the platform does not publish — a TV box, a set-top box or any device without a GNSS
+  receiver has no `gps` provider, and the manifest deliberately lets the app install on those — so
+  the absent provider's throw discarded the *other* provider's answer and the enclosing `catch`
+  replaced the whole row with "Unreadable: Provider \"gps\" doesn't exist". A device with network
+  location enabled and no GNSS therefore reported that it could not read the row at all. This is the
+  last instance of the fault **Y1** fixed in the other connectivity blocks in this same file: there
+  the throw fell *between* emitted rows, here it falls *inside* one row's construction, which is why
+  the earlier pass did not reach it. *Change:* each provider is read through the existing `attempt`
+  helper and the row is built by a new pure `locationProviderRow(gps, network)`. A provider that was
+  read decides the value; a provider that threw contributes nothing; when neither reports enabled the
+  row says "None enabled" only if both reads actually happened, and otherwise reports the failure
+  instead of a measurement it never took. Every combination the row could already render renders the
+  same text — "GPS", "Network", "GPS, Network", "None enabled", "Unreadable: …" and the
+  "Capability only" note are unchanged — so no working device sees any difference; only the reading
+  that used to be thrown away is now reported. *Tests:* six cases in `ConnectivityCollectorTest`
+  (both enabled, both disabled, GPS absent, network absent, one unread plus the other disabled, both
+  absent), which is 13 tests in that class, up from 7.
 
 ## When the list runs out
 

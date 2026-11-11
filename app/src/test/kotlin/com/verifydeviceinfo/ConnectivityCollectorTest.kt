@@ -6,7 +6,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.verifydeviceinfo.core.model.DiagnosticStatus
 import com.verifydeviceinfo.core.model.SpecField
 import com.verifydeviceinfo.data.android.collect.ConnectivityCollector
+import com.verifydeviceinfo.data.android.collect.Reading
 import com.verifydeviceinfo.data.android.collect.attempt
+import com.verifydeviceinfo.data.android.collect.locationProviderRow
 import com.verifydeviceinfo.data.android.collect.unreadableNote
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -105,5 +107,59 @@ class ConnectivityCollectorTest {
             assertNotNull("${field.key} carries no note", field.note ?: field.source)
         }
         assertFalse(fields.isEmpty())
+    }
+
+    // ---- Enabled location providers -------------------------------------------------------
+    //
+    // `isProviderEnabled` throws IllegalArgumentException for a provider the platform does not
+    // publish, which is the normal case on a device with no GNSS. The row must keep the other
+    // provider's reading instead of reporting the whole row as unreadable.
+
+    @Test
+    fun `both providers readable and enabled lists both`() {
+        val row = locationProviderRow(Reading(true, null), Reading(true, null))
+        assertEquals("GPS, Network", row.value)
+        assertNull(row.note)
+    }
+
+    @Test
+    fun `both providers readable and disabled says none enabled`() {
+        val row = locationProviderRow(Reading(false, null), Reading(false, null))
+        assertEquals("None enabled", row.value)
+        assertNull(row.note)
+    }
+
+    @Test
+    fun `an absent GPS provider keeps the network provider's reading`() {
+        val absent = IllegalArgumentException("Provider \"gps\" doesn't exist")
+        val row = locationProviderRow(Reading(null, absent), Reading(true, null))
+        assertEquals("Network", row.value)
+        assertNull("a row with a value needs no unreadable note", row.note)
+    }
+
+    @Test
+    fun `an absent network provider keeps the GPS reading`() {
+        val absent = IllegalArgumentException("Provider \"network\" doesn't exist")
+        val row = locationProviderRow(Reading(true, null), Reading(null, absent))
+        assertEquals("GPS", row.value)
+        assertNull(row.note)
+    }
+
+    @Test
+    fun `an unread provider is not reported as none enabled`() {
+        // One provider is unknown, so "None enabled" would be a measurement the row never took.
+        val absent = IllegalArgumentException("Provider \"gps\" doesn't exist")
+        val row = locationProviderRow(Reading(null, absent), Reading(false, null))
+        assertNull(row.value)
+        assertEquals("Unreadable: Provider \"gps\" doesn't exist", row.note)
+    }
+
+    @Test
+    fun `both providers absent reports the failure once`() {
+        val gpsAbsent = IllegalArgumentException("Provider \"gps\" doesn't exist")
+        val networkAbsent = IllegalArgumentException("Provider \"network\" doesn't exist")
+        val row = locationProviderRow(Reading(null, gpsAbsent), Reading(null, networkAbsent))
+        assertNull(row.value)
+        assertEquals("Unreadable: Provider \"gps\" doesn't exist", row.note)
     }
 }
