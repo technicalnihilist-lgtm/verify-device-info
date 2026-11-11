@@ -2203,6 +2203,52 @@ from `maven-central.storage-download.googleapis.com`, since `repo1.maven.org` an
 `org.robolectric:nativeruntime-dist-compat:1.0.16` had to be served from a local file repository
 through a sandbox-only init script. No build file, repository list or dependency changed.
 
+## CC. Audit findings — 11 November run, sixth pass
+
+The list was re-read before anything was touched, and every open item was passed over for the reason
+already recorded against it, not by assumption: **F1**, **F3** and **I8** are still sandbox-bound
+(`nproc` = 2, `free` = 2,098 MB; a cold `assembleDebug` needed nine 300 s calls this run, so the
+non-resumable `minifyReleaseWithR8` and `lintAnalyzeDebug` still have no window); **G1** and **I10**
+duplicate measurements already recorded next to their items; **H2, H5, H7, H9, H11, H13, H14, M2,
+M3, M4** need a visible change (a rendered value, a new row, a re-flowed PDF or a progress count);
+**L2, P2, V2** need sign-off because they move a reported verdict or make the report briefly stale.
+That left one fresh audit finding on the scan's error path, which is implemented in this run.
+
+- [x] **CC1. `StageTimer.run` cannot tell a stage's own `CancellationException` from a cancelled
+  scan.** The catch block treated every `CancellationException` that came out of `work.await()` as
+  "the caller was superseded" and rethrew it, so a stage that gave up on its own — a collector that
+  wraps a probe in `withTimeout`, a Binder helper whose job is cancelled by the framework, a
+  `suspendCancellableCoroutine` cancelled from a callback — abandoned the remaining collection
+  stages and surfaced in `AppViewModel` as `Scan failed: ...` with no snapshot at all. That
+  contradicts the class's own contract ("Never throws for a stage failure or a timeout; only
+  cancellation of the calling coroutine propagates") and the promise the whole timer exists for,
+  that a scan always finishes with whatever it could read. *Change:* after cancelling the abandoned
+  stage, the caller's own job state decides — `currentCoroutineContext().isActive` false means the
+  scan really was superseded, so the exception is rethrown and the scan unwinds as before; active
+  means the stage failed, so it is returned as `StageOutcome.Failed` and the scan carries on. The
+  superseded-scan path is unchanged, which is what `ScanCoordinator` and `AppViewModel` depend on.
+  *Tests:* two new cases in `StageTimerTest` — a stage that throws `CancellationException` is a
+  stage failure and the next stage still runs, and a caller that is cancelled mid-stage still
+  unwinds instead of being recorded as a stage failure (10 tests in that class now, 8 before).
+  *Honest scope:* no collector throws `CancellationException` today — all nine stages are blocking
+  Java calls — so this fixes a latent path rather than a reproduced crash. It is worth pinning
+  because `SensorProbe` already uses `withTimeout` in the diagnostics path and the next collector
+  that adopts that pattern would otherwise take the whole scan down with it.
+  `assembleDebug` green; the debug APK is 9,827,992 bytes before and after (no size claim — this
+  build is not byte-reproducible, see J1/J2). All **52** unit test classes pass, run in six groups
+  because the suite does not fit in one 300 s call here. No UI, copy or layout change: the diff is
+  `StageTimer.kt`, `StageTimerTest.kt` and this file, and `ScreenshotTest` re-renders every published
+  screen green.
+
+Two build facts for the next pass. This pod was killed once mid-run while a 1750 MB Gradle daemon was
+kept alive across calls next to the test JVM, taking the whole workspace with it; with
+`org.gradle.daemon=false` (the repo default) a call is slower but the pod survives, so the heap bump
+belongs on the command line for one call at a time, not in a long-lived daemon. Robolectric again had
+to be pre-fetched (`ROBOLECTRIC_DEPENDENCY_DIR`; jars for API 29, 30, 33, 34 and 35, in 20 MB range
+requests from `maven-central.storage-download.googleapis.com` because `repo1.maven.org` answers 429),
+and `org.robolectric:nativeruntime-dist-compat:1.0.16` plus its POM had to be served from a local file
+repository through a sandbox-only init script. No build file, repository list or dependency changed.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

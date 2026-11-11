@@ -2,10 +2,12 @@ package com.verifydeviceinfo
 
 import com.verifydeviceinfo.core.util.StageOutcome
 import com.verifydeviceinfo.core.util.StageTimer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -61,6 +63,45 @@ class StageTimerTest {
         scope.cancel()
         assertTrue(outcome is StageOutcome.Failed)
         assertEquals("binder died", (outcome as StageOutcome.Failed).error.message)
+    }
+
+    @Test
+    fun `a stage that cancels itself is a stage failure, not a cancelled scan`() = runTest {
+        // A collector that gives up on its own — a `withTimeout` around a probe, a helper whose
+        // job is cancelled by the framework — raises a CancellationException that has nothing to
+        // do with the scan being superseded. It must be recorded against that stage, and the
+        // stages after it must still run.
+        val (timer, scope) = timer()
+        val failed = timer.run<String> { throw CancellationException("probe gave up") }
+        val next = timer.run { "sensors" }
+        scope.cancel()
+
+        assertTrue("expected a stage failure, got $failed", failed is StageOutcome.Failed)
+        assertEquals("probe gave up", (failed as StageOutcome.Failed).error.message)
+        assertEquals(StageOutcome.Done("sensors"), next)
+    }
+
+    @Test
+    fun `a cancelled caller still unwinds instead of recording a stage failure`() = runTest {
+        // The other half of the same decision: when the scan itself is superseded, the
+        // CancellationException must reach the caller, because that is how it stops.
+        val (timer, scope) = timer(stageMillis = 10_000L, totalMillis = 10_000L)
+        var unwound = false
+
+        val scan = launch {
+            try {
+                timer.run { delay(5_000L) }
+            } catch (e: CancellationException) {
+                unwound = true
+                throw e
+            }
+        }
+        testScheduler.runCurrent()
+        scan.cancel()
+        testScheduler.advanceUntilIdle()
+        scope.cancel()
+
+        assertTrue("a superseded scan must unwind, not be reported as a stage failure", unwound)
     }
 
     @Test

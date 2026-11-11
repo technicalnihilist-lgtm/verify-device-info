@@ -5,6 +5,8 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** What one collection stage produced. */
@@ -66,9 +68,20 @@ class StageTimer(
         val boxed = try {
             withTimeoutOrNull(budget) { work.await() }
         } catch (e: CancellationException) {
-            // The caller was cancelled (a newer scan superseded this one): stop the stage too.
+            // Two different things arrive here and only one of them may unwind the scan.
+            //
+            // The caller was cancelled — a newer scan superseded this one — so the stage is
+            // stopped and the exception is rethrown: that is how the superseded scan unwinds.
+            //
+            // But a stage can raise a `CancellationException` of its own: a collector that wraps
+            // a probe in `withTimeout` (as `SensorProbe` already does), a Binder helper that
+            // gives up, a `suspendCancellableCoroutine` whose job is cancelled by the framework.
+            // That is a stage failure like any other — the contract above says so — and treating
+            // it as caller cancellation used to abandon the remaining stages and report the whole
+            // scan as failed. The caller's own job state is what tells the two apart.
             work.cancel()
-            throw e
+            if (!currentCoroutineContext().isActive) throw e
+            return StageOutcome.Failed(e)
         } catch (e: Exception) {
             work.cancel()
             return StageOutcome.Failed(e)
