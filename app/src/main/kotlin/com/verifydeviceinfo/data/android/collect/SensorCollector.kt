@@ -11,7 +11,18 @@ import com.verifydeviceinfo.core.util.logicalSensorCount
 import java.util.Locale
 
 /** Enumerates every sensor the sensor service reports, with vendor strings intact. */
-class SensorCollector(private val context: Context) {
+class SensorCollector(
+    private val context: Context,
+    /**
+     * Reads the sensor list from the sensor service.
+     *
+     * Injectable only so the enumeration-failure path can be driven by a test without a device:
+     * production always uses `SensorManager.getSensorList(Sensor.TYPE_ALL)`. It is a
+     * `SensorManager ->` lambda rather than a `() ->` one so the manager lookup stays in [collect],
+     * where it already was.
+     */
+    private val sensorList: (SensorManager) -> List<Sensor> = { it.getSensorList(Sensor.TYPE_ALL) }
+) {
 
     fun collect(): Pair<List<SensorFacts>, List<SpecField>> {
         val fields = mutableListOf<SpecField>()
@@ -25,9 +36,11 @@ class SensorCollector(private val context: Context) {
                 )
             )
 
+        var enumerationFailure: String? = null
         val sensors = try {
-            manager.getSensorList(Sensor.TYPE_ALL)
+            sensorList(manager)
         } catch (e: Exception) {
+            enumerationFailure = e.message ?: e.javaClass.simpleName
             emptyList()
         }
 
@@ -53,10 +66,21 @@ class SensorCollector(private val context: Context) {
             )
         }
 
-        fields += FieldBuilder.value(
-            "sensor.count", "Sensors enumerated", logicalSensorCount(facts).toString(),
-            SpecGroup.SENSOR, "SensorManager.getSensorList(TYPE_ALL)"
-        )
+        fields += if (enumerationFailure == null) {
+            FieldBuilder.value(
+                "sensor.count", "Sensors enumerated", logicalSensorCount(facts).toString(),
+                SpecGroup.SENSOR, "SensorManager.getSensorList(TYPE_ALL)"
+            )
+        } else {
+            // A refused enumeration is not a device with no sensors: the row reports the read
+            // failure instead of "0", which is a measurement it never took. The seven category
+            // rows below keep their wording, since "not reported" is still true.
+            FieldBuilder.value(
+                "sensor.count", "Sensors enumerated", null, SpecGroup.SENSOR,
+                "SensorManager.getSensorList(TYPE_ALL)",
+                note = "Unreadable: sensor enumeration failed: $enumerationFailure"
+            )
+        }
 
         val grouped = facts.groupBy { it.category }
         val expected = listOf("Accelerometer", "Gyroscope", "Magnetometer", "Proximity", "Light", "Barometer", "Step counter")

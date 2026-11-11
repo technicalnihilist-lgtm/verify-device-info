@@ -2085,7 +2085,7 @@ other two are specified below for the next pass.
   and this entry. Debug APK 9,827,992 bytes, with no size claim: the debug APK is not byte-reproducible
   on this toolchain, and that figure is also the one recorded under M5 and Y1 for different commits.
 
-- [ ] **Z2. A sensor service that refuses enumeration is reported as a device with no sensors.**
+- [x] **Z2. A sensor service that refuses enumeration is reported as a device with no sensors.**
   `SensorCollector.collect` wraps `manager.getSensorList(Sensor.TYPE_ALL)` in `try`/`catch` that
   returns `emptyList()`, and the section then emits "Sensors enumerated: `0`" through
   `FieldBuilder.value` — VERIFIED, HIGH confidence — plus one "Not reported by the sensor service" row
@@ -2100,6 +2100,21 @@ other two are specified below for the next pass.
   Z1's `cameraIds`), asserting the count row is UNVERIFIED with no value on the failure path and
   `0`-style VERIFIED when the read answers with an empty list. No visible change on any path that
   works today.
+  *Done (11 Nov run, fourth pass):* the enumeration is now its own read, `sensorList(manager)` — a
+  `SensorManager -> List<Sensor>` constructor parameter that defaults to
+  `it.getSensorList(Sensor.TYPE_ALL)`, the same shape as Z1's `cameraIds` — so a throw is caught
+  around the read alone and recorded. `sensor.count` is emitted from one branch: unchanged
+  (`logicalSensorCount(facts)`, VERIFIED, HIGH) when the read answered, and `Unavailable` /
+  UNVERIFIED / `Confidence.NONE` with the note "Unreadable: sensor enumeration failed: <reason>"
+  when it did not; an exception with no message names its class instead of printing "null". The
+  seven category rows, the per-sensor detail rows and every label, group and source string are
+  unchanged, and no file under `ui/` or `res/` is touched. The hardware score is deliberately left
+  alone: `DefaultScoreEngine` already treats an empty sensor list as missing evidence, so the score
+  on this path is what it was. Tests: 5 in the new `SensorCollectorTest` (Robolectric, API 34),
+  driving the collector through the injected reader; two of them fail against the previous
+  count-row logic (checked by restoring it and re-running the class), so they are the regression
+  tests for this item. `assembleDebug` green with no compiler warnings; 389 unit tests pass (384
+  before, 5 new); `tools/check-no-ui-change.sh` clean.
 
 - [ ] **Z3. A refused audio device list is reported as "no speaker, no microphone".**
   `AudioCollector.collect` reads `getDevices(GET_DEVICES_OUTPUTS)` and `…INPUTS` in two `try`/`catch`
@@ -2113,6 +2128,28 @@ other two are specified below for the next pass.
   reader, asserting the presence rows carry no "Not reported" claim when the list read failed, and
   that a working read still prints "Present"/"Not reported" exactly as today. No visible change on any
   path that works today.
+
+## AA. Audit findings — 11 November run, fourth pass
+
+The nineteen items open at the start of this run are blocked here for the reasons Q and W recorded,
+and were re-read rather than re-fixed: **F1** and **F3** are sandbox-bound again (`nproc` = 2,
+`free` = 2,098 MB — this run's cold `assembleDebug` needed six 300 s calls and `testDebugUnitTest`
+two more, so neither the non-resumable `minifyReleaseWithR8` nor `lintAnalyzeDebug` has a window);
+**G1** and **I10** are duplicates of measurements already recorded, as Q and W set out; **I8** duplicates F3;
+**H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** need a visible change (a rendered value, a new row or
+a re-flowed PDF); **L2, P2, V2** need sign-off because they move a reported verdict. That left **Z2**
+and **Z3**, which are Z1's defect in two more collectors and were written as implementable. Z2 was
+taken (first of the two, and the direct sequel to the previous run's camera fix) and is ticked
+above; Z3 is the same fix for `AudioCollector` and stays open for the next pass.
+
+One environment fact worth recording, because it cost this run three test cycles: `testDebugUnitTest`
+could not download Robolectric's runtime — the forked test JVM fetches `android-all-instrumented`
+over a plain `HttpURLConnection` that the sandbox proxy refused (`MavenArtifactFetcher` →
+`IOException`) — and the build already supports the offline path
+(`ROBOLECTRIC_DEPENDENCY_DIR` → `robolectric.offline` + `robolectric.dependency.dir`). Fetching the
+jars with `curl` from `repo1.maven.org` into one directory and exporting that variable fixes it; the
+suite needs one jar per SDK the tests name, and the ones used this run were 5.0.2_r3 through
+15-robolectric-12650502, all at the `-i7` suffix for Robolectric 4.14.1.
 
 ## When the list runs out
 
