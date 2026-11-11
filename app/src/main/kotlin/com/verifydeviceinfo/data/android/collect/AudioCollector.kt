@@ -18,48 +18,69 @@ data class AudioFacts(
 )
 
 /** Audio endpoints and haptics, from AudioManager and the vibrator service. */
-class AudioCollector(private val context: Context) {
+class AudioCollector(
+    private val context: Context,
+    /**
+     * Reads the output device list from the audio service.
+     *
+     * Injectable only so the read-failure path can be driven by a test without a device:
+     * production always uses `AudioManager.getDevices(GET_DEVICES_OUTPUTS)`. It is an
+     * `AudioManager ->` lambda rather than a `() ->` one so the manager lookup stays in [collect],
+     * where it already was.
+     */
+    private val outputDevices: (AudioManager) -> List<AudioDeviceInfo> =
+        { it.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList() },
+    /** The input list, read the same way; see [outputDevices]. */
+    private val inputDevices: (AudioManager) -> List<AudioDeviceInfo> =
+        { it.getDevices(AudioManager.GET_DEVICES_INPUTS).toList() }
+) {
 
     fun collect(): AudioFacts {
         val fields = mutableListOf<SpecField>()
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
-        val outputs = try {
-            audioManager?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.toList().orEmpty()
-        } catch (e: Exception) {
-            emptyList()
-        }
-        val inputs = try {
-            audioManager?.getDevices(AudioManager.GET_DEVICES_INPUTS)?.toList().orEmpty()
-        } catch (e: Exception) {
-            emptyList()
-        }
+        // A refused list is not an empty one. Both reads used to collapse to `emptyList()` in their
+        // own `catch`, which turned a throwing `getDevices` into three "Not reported" rows — a claim
+        // of absence drawn from a read that never answered, contradicted by the two list rows below
+        // it, which fell to "Unavailable". Reading through `attempt` keeps the reason so the rows
+        // that depend on the list can say "Unreadable" instead.
+        val outputs = audioManager
+            ?.let { manager -> attempt { outputDevices(manager) } }
+            ?: Reading(emptyList<AudioDeviceInfo>(), null)
+        val inputs = audioManager
+            ?.let { manager -> attempt { inputDevices(manager) } }
+            ?: Reading(emptyList<AudioDeviceInfo>(), null)
 
-        val speaker = outputs.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-        val earpiece = outputs.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
-        val microphone = inputs.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+        val outputList = outputs.value.orEmpty()
+        val inputList = inputs.value.orEmpty()
+
+        val speaker = outputList.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+        val earpiece = outputList.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+        val microphone = inputList.any { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
 
         fields += FieldBuilder.value(
             "audio.outputDevices", "Audio outputs",
-            outputs.joinToString(", ") { deviceName(it) }.ifBlank { null },
-            SpecGroup.AUDIO, "AudioManager.getDevices(GET_DEVICES_OUTPUTS)"
+            outputList.joinToString(", ") { deviceName(it) }.ifBlank { null },
+            SpecGroup.AUDIO, "AudioManager.getDevices(GET_DEVICES_OUTPUTS)",
+            note = outputs.failure?.let { readFailureNote("output", it) }
         )
         fields += FieldBuilder.value(
             "audio.inputDevices", "Audio inputs",
-            inputs.joinToString(", ") { deviceName(it) }.ifBlank { null },
-            SpecGroup.AUDIO, "AudioManager.getDevices(GET_DEVICES_INPUTS)"
+            inputList.joinToString(", ") { deviceName(it) }.ifBlank { null },
+            SpecGroup.AUDIO, "AudioManager.getDevices(GET_DEVICES_INPUTS)",
+            note = inputs.failure?.let { readFailureNote("input", it) }
         )
-        fields += FieldBuilder.value(
-            "audio.speaker", "Built-in speaker", if (speaker) "Present" else "Not reported",
-            SpecGroup.AUDIO, "AudioDeviceInfo.TYPE_BUILTIN_SPEAKER"
+        fields += presence(
+            "audio.speaker", "Built-in speaker", speaker, outputs.failure,
+            "output", "AudioDeviceInfo.TYPE_BUILTIN_SPEAKER"
         )
-        fields += FieldBuilder.value(
-            "audio.earpiece", "Earpiece", if (earpiece) "Present" else "Not reported",
-            SpecGroup.AUDIO, "AudioDeviceInfo.TYPE_BUILTIN_EARPIECE"
+        fields += presence(
+            "audio.earpiece", "Earpiece", earpiece, outputs.failure,
+            "output", "AudioDeviceInfo.TYPE_BUILTIN_EARPIECE"
         )
-        fields += FieldBuilder.value(
-            "audio.microphone", "Built-in microphone", if (microphone) "Present" else "Not reported",
-            SpecGroup.AUDIO, "AudioDeviceInfo.TYPE_BUILTIN_MIC"
+        fields += presence(
+            "audio.microphone", "Built-in microphone", microphone, inputs.failure,
+            "input", "AudioDeviceInfo.TYPE_BUILTIN_MIC"
         )
         fields += FieldBuilder.value(
             "audio.sampleRate", "Native output sample rate",
@@ -110,6 +131,31 @@ class AudioCollector(private val context: Context) {
 
         return AudioFacts(speaker, microphone, vibratorAvailable, fields)
     }
+
+    /**
+     * A presence row: "Present" or "Not reported" from a list that answered, and a read failure
+     * instead of "Not reported" from a list that did not.
+     */
+    private fun presence(
+        key: String,
+        label: String,
+        present: Boolean,
+        failure: Exception?,
+        direction: String,
+        source: String
+    ): SpecField = if (failure != null) {
+        FieldBuilder.value(
+            key, label, null, SpecGroup.AUDIO, source,
+            note = readFailureNote(direction, failure)
+        )
+    } else {
+        FieldBuilder.value(key, label, if (present) "Present" else "Not reported", SpecGroup.AUDIO, source)
+    }
+
+    /** The note a row carries when the device list it was derived from could not be read. */
+    private fun readFailureNote(direction: String, failure: Exception): String =
+        "Unreadable: audio $direction device list failed: " +
+            (failure.message ?: failure.javaClass.simpleName)
 
     private fun deviceName(device: AudioDeviceInfo): String {
         val type = when (device.type) {

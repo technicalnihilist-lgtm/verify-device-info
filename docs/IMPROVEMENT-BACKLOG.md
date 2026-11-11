@@ -2116,7 +2116,7 @@ other two are specified below for the next pass.
   tests for this item. `assembleDebug` green with no compiler warnings; 389 unit tests pass (384
   before, 5 new); `tools/check-no-ui-change.sh` clean.
 
-- [ ] **Z3. A refused audio device list is reported as "no speaker, no microphone".**
+- [x] **Z3. A refused audio device list is reported as "no speaker, no microphone".**
   `AudioCollector.collect` reads `getDevices(GET_DEVICES_OUTPUTS)` and `…INPUTS` in two `try`/`catch`
   blocks that both collapse to `emptyList()`, and the three presence rows then print
   "Not reported" for the built-in speaker, earpiece and microphone — a claim of absence drawn from a
@@ -2128,6 +2128,37 @@ other two are specified below for the next pass.
   reader, asserting the presence rows carry no "Not reported" claim when the list read failed, and
   that a working read still prints "Present"/"Not reported" exactly as today. No visible change on any
   path that works today.
+  *Done (11 Nov run, fifth pass):* each list is now its own read — `outputDevices` and `inputDevices`
+  are `AudioManager -> List<AudioDeviceInfo>` constructor parameters that default to
+  `getDevices(GET_DEVICES_OUTPUTS)` and `…INPUTS`, the same shape as Z1's `cameraIds` and Z2's
+  `sensorList` — and each goes through Y1's `attempt`, so a throw is caught around one read and keeps
+  its reason instead of collapsing to `emptyList()`. A presence row is emitted from one helper,
+  `presence(...)`: unchanged ("Present" / "Not reported", VERIFIED, HIGH) when the list it depends on
+  answered, and `Unavailable` / UNVERIFIED / `Confidence.NONE` with the note
+  "Unreadable: audio <output|input> device list failed: <reason>" when it did not, so the three
+  presence rows no longer contradict the two list rows above them. An exception with no message names
+  its class rather than printing "null". The two list rows keep their values and gain that same note
+  on the failure path only. Every label, group, source string, key and the `Present`/`Not reported`
+  wording on a working read are byte-identical, and no file under `ui/` or `res/` is touched. The
+  `AudioFacts.speakerAvailable`/`microphoneAvailable` flags deliberately keep their previous value
+  (false) on a failed read, so the hardware score on that path is what it was — the same decision Z2
+  recorded for the sensor count. Tests: 6 in the new `AudioCollectorTest` (Robolectric, API 34),
+  driving the collector through both injected readers — the refused output list, the refused input
+  list, one list failing while the other answers, an exception with no message, an answered-but-empty
+  list still rendering exactly today's values, and the flags staying false. **Mutation-checked, not
+  just green:** with `presence(...)` restored to the old unconditional
+  `if (present) "Present" else "Not reported"`, exactly the three failure-path tests fail
+  (`a refused output list…`, `a refused input list…`, `an exception with no message…`) and the three
+  unchanged-path tests still pass; the file was then restored and is byte-identical to the committed
+  one. `assembleDebug` green with no compiler warnings; **395** unit tests pass (389 before, 6 new),
+  re-executed with `--rerun` rather than taken from the build cache; `tools/check-no-ui-change.sh`
+  clean (31 files tracked under `ui/` and `res/`, none differs) — the diff is one modified collector
+  and one new test file.
+  *Recorded while writing it, not fixed here:* `AudioCollector` has the same defect in the vibrator
+  probe two rows below — its `try`/`catch` around `Vibrator.hasVibrator()` returns `false`, so a
+  refused haptics read prints "Not reported" for the vibration motor. It is the same fix (an injected
+  reader plus a `Reading`), but it is a different row and belongs to its own item rather than to this
+  one.
 
 ## AA. Audit findings — 11 November run, fourth pass
 
@@ -2150,6 +2181,27 @@ over a plain `HttpURLConnection` that the sandbox proxy refused (`MavenArtifactF
 jars with `curl` from `repo1.maven.org` into one directory and exporting that variable fixes it; the
 suite needs one jar per SDK the tests name, and the ones used this run were 5.0.2_r3 through
 15-robolectric-12650502, all at the `-i7` suffix for Robolectric 4.14.1.
+
+## BB. Audit findings — 11 November run, fifth pass
+
+The list was re-read before anything was touched, and every item above Z3 was passed over for the
+reason already recorded against it, not by assumption: **F1** and **F3** remain sandbox-bound
+(`nproc` = 2, `free` = 2,098 MB — this run's cold `assembleDebug` needed four 300 s calls and the
+first green test run three more, so neither the non-resumable `minifyReleaseWithR8` nor
+`lintAnalyzeDebug` has a window here); **G1** and **I10** duplicate measurements already recorded next
+to their items; **I8** duplicates F3; **H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** need a visible
+change (a rendered value, a new row or a re-flowed PDF); **L2, P2, V2** need sign-off because they
+move a reported verdict. That left **Z3**, the last of Z1's defect in the collectors, which was
+implemented in this run and is ticked above.
+
+One build fact worth recording for the next pass: this sandbox's cold configuration-cache
+calculation alone does not finish inside a 300 s call, and a killed build discards it, so every
+retry restarted from zero — `gradle assembleDebug --dry-run` stores the entry in 1m34s and each later
+call then reuses it, which is what made a green build possible here at all. Robolectric's runtime
+also had to be pre-fetched again (`ROBOLECTRIC_DEPENDENCY_DIR`, jars for API 29, 30, 33, 34 and 35
+from `maven-central.storage-download.googleapis.com`, since `repo1.maven.org` answered 429), and
+`org.robolectric:nativeruntime-dist-compat:1.0.16` had to be served from a local file repository
+through a sandbox-only init script. No build file, repository list or dependency changed.
 
 ## When the list runs out
 
