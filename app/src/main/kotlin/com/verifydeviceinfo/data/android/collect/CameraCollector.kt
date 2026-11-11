@@ -15,7 +15,17 @@ import java.util.Locale
  * Enumerates cameras through Camera2. Reading characteristics does not require the camera
  * permission; opening a camera for the interactive test does.
  */
-class CameraCollector(private val context: Context) {
+class CameraCollector(
+    private val context: Context,
+    /**
+     * Reads the camera id list from the camera service.
+     *
+     * Injectable only so the enumeration-failure path can be driven by a test without a device:
+     * production always uses `CameraManager.cameraIdList`. It is a `CameraManager ->` lambda rather
+     * than a `() ->` one so the manager lookup stays in [collect], where it already was.
+     */
+    private val cameraIds: (CameraManager) -> List<String> = { it.cameraIdList.asList() }
+) {
 
     fun collect(): Pair<List<CameraFacts>, List<SpecField>> {
         val fields = mutableListOf<SpecField>()
@@ -29,79 +39,96 @@ class CameraCollector(private val context: Context) {
                 )
             )
 
-        try {
-            val ids = manager.cameraIdList
-            ids.forEach { id ->
-                try {
-                    val characteristics = manager.getCameraCharacteristics(id)
-                    val facing = when (characteristics.get(CameraCharacteristics.LENS_FACING)) {
-                        CameraCharacteristics.LENS_FACING_BACK -> "BACK"
-                        CameraCharacteristics.LENS_FACING_FRONT -> "FRONT"
-                        CameraCharacteristics.LENS_FACING_EXTERNAL -> "EXTERNAL"
-                        else -> "UNKNOWN"
-                    }
-                    val pixelArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
-                    val physicalSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
-                    val streamMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                    val jpegSizes = streamMap?.getOutputSizes(ImageFormat.JPEG).orEmpty()
-                    val largest = jpegSizes.maxByOrNull { it.width.toLong() * it.height } ?: pixelArray
-                    val megapixels = if (largest != null) {
-                        (largest.width.toDouble() * largest.height.toDouble()) / 1_000_000.0
-                    } else 0.0
-                    val pixelSize = if (physicalSize != null && pixelArray != null && pixelArray.width > 0) {
-                        (physicalSize.width / pixelArray.width * 1000.0)
-                    } else null
-                    val hardwareLevel = when (characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)) {
-                        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY -> "Legacy"
-                        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED -> "Limited"
-                        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL -> "Full"
-                        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3 -> "Level 3"
-                        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_EXTERNAL -> "External"
-                        else -> "Unknown"
-                    }
-                    val physicalIds = if (Build.VERSION.SDK_INT >= 28) {
-                        try {
-                            characteristics.physicalCameraIds.toList()
-                        } catch (e: Exception) {
-                            emptyList()
-                        }
-                    } else emptyList()
-
-                    cameras += CameraFacts(
-                        id = id,
-                        lensFacing = facing,
-                        sensorWidthPx = pixelArray?.width ?: 0,
-                        sensorHeightPx = pixelArray?.height ?: 0,
-                        maxJpegWidth = largest?.width ?: 0,
-                        maxJpegHeight = largest?.height ?: 0,
-                        megapixels = megapixels,
-                        flashAvailable = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true,
-                        hardwareLevel = hardwareLevel,
-                        apertures = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.toList().orEmpty(),
-                        focalLengthsMm = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.toList().orEmpty(),
-                        physicalCameraIds = physicalIds,
-                        pixelSizeMicrons = pixelSize
-                    )
-                } catch (e: Exception) {
-                    fields += FieldBuilder.value(
-                        "camera.$id.error", "Camera $id", null, SpecGroup.CAMERA, "CameraManager",
-                        note = "Could not read characteristics: ${e.message}"
-                    )
-                }
-            }
+        var enumerationFailure: String? = null
+        val ids = try {
+            cameraIds(manager)
         } catch (e: Exception) {
+            enumerationFailure = e.message ?: e.javaClass.simpleName
+            emptyList()
+        }
+
+        ids.forEach { id ->
+            try {
+                val characteristics = manager.getCameraCharacteristics(id)
+                val facing = when (characteristics.get(CameraCharacteristics.LENS_FACING)) {
+                    CameraCharacteristics.LENS_FACING_BACK -> "BACK"
+                    CameraCharacteristics.LENS_FACING_FRONT -> "FRONT"
+                    CameraCharacteristics.LENS_FACING_EXTERNAL -> "EXTERNAL"
+                    else -> "UNKNOWN"
+                }
+                val pixelArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
+                val physicalSize = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+                val streamMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                val jpegSizes = streamMap?.getOutputSizes(ImageFormat.JPEG).orEmpty()
+                val largest = jpegSizes.maxByOrNull { it.width.toLong() * it.height } ?: pixelArray
+                val megapixels = if (largest != null) {
+                    (largest.width.toDouble() * largest.height.toDouble()) / 1_000_000.0
+                } else 0.0
+                val pixelSize = if (physicalSize != null && pixelArray != null && pixelArray.width > 0) {
+                    (physicalSize.width / pixelArray.width * 1000.0)
+                } else null
+                val hardwareLevel = when (characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)) {
+                    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY -> "Legacy"
+                    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED -> "Limited"
+                    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL -> "Full"
+                    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3 -> "Level 3"
+                    CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_EXTERNAL -> "External"
+                    else -> "Unknown"
+                }
+                val physicalIds = if (Build.VERSION.SDK_INT >= 28) {
+                    try {
+                        characteristics.physicalCameraIds.toList()
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                } else emptyList()
+
+                cameras += CameraFacts(
+                    id = id,
+                    lensFacing = facing,
+                    sensorWidthPx = pixelArray?.width ?: 0,
+                    sensorHeightPx = pixelArray?.height ?: 0,
+                    maxJpegWidth = largest?.width ?: 0,
+                    maxJpegHeight = largest?.height ?: 0,
+                    megapixels = megapixels,
+                    flashAvailable = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true,
+                    hardwareLevel = hardwareLevel,
+                    apertures = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.toList().orEmpty(),
+                    focalLengthsMm = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.toList().orEmpty(),
+                    physicalCameraIds = physicalIds,
+                    pixelSizeMicrons = pixelSize
+                )
+            } catch (e: Exception) {
+                fields += FieldBuilder.value(
+                    "camera.$id.error", "Camera $id", null, SpecGroup.CAMERA, "CameraManager",
+                    note = "Could not read characteristics: ${e.message}"
+                )
+            }
+        }
+
+        if (enumerationFailure != null) {
             fields += FieldBuilder.unsupported(
                 "camera.list", "Camera modules", SpecGroup.CAMERA, "CameraManager",
-                "Camera enumeration failed: ${e.message}"
+                "Camera enumeration failed: $enumerationFailure"
             )
         }
 
-        fields += FieldBuilder.value(
-            "camera.count", "Camera modules enumerated",
-            "${cameras.size} (${cameras.count { it.lensFacing == "BACK" }} rear, " +
-                "${cameras.count { it.lensFacing == "FRONT" }} front)",
-            SpecGroup.CAMERA, "CameraManager.cameraIdList"
-        )
+        fields += if (enumerationFailure == null) {
+            FieldBuilder.value(
+                "camera.count", "Camera modules enumerated",
+                "${cameras.size} (${cameras.count { it.lensFacing == "BACK" }} rear, " +
+                    "${cameras.count { it.lensFacing == "FRONT" }} front)",
+                SpecGroup.CAMERA, "CameraManager.cameraIdList"
+            )
+        } else {
+            // A refused enumeration is not a device with no cameras: the row reports the read
+            // failure instead of "0 (0 rear, 0 front)", which is a measurement it never took.
+            FieldBuilder.value(
+                "camera.count", "Camera modules enumerated", null, SpecGroup.CAMERA,
+                "CameraManager.cameraIdList",
+                note = "Unreadable: camera enumeration failed: $enumerationFailure"
+            )
+        }
         cameras.forEach { camera ->
             val label = "${camera.lensFacing.lowercase(Locale.US).replaceFirstChar { it.uppercase() }} camera ${camera.id}"
             fields += FieldBuilder.value(

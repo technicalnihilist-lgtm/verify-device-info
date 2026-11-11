@@ -486,6 +486,9 @@ build and tests green before committing.
   *Passed over (11 Nov run):* unchanged — `nproc` = 2, 2,098 MB, and this run's cold `assembleDebug`
   needed seven 300 s calls before it first went green, so the non-resumable `minifyReleaseWithR8`
   still has nowhere to run here.
+  *Passed over (11 Nov, third pass):* unchanged — `nproc` = 2, 2,098 MB, and this run's cold
+  `assembleDebug` needed four 300 s calls before it went green, so the non-resumable
+  `minifyReleaseWithR8` still has nowhere to run here.
 
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
@@ -2021,6 +2024,95 @@ calls into `SpecField` rows — and one finding cleared the bar.
   and this entry. Debug APK 9,827,992 bytes, with no size claim: the debug APK is not byte-reproducible
   on this toolchain, and the 9,900,073-byte figure recorded under X1 is a different build of a
   different commit.
+
+## Z. Audit findings — 11 November run, third pass
+
+The eighteen open items above were re-read before anything new was added, and the answer had not
+changed. Blocked by this sandbox: F1 and F3 (2 cores / 2,098 MB; neither `minifyReleaseWithR8` nor
+`lintAnalyzeDebug` finishes inside one 300 s call or resumes across calls), and I8 with them.
+Duplicates of numbers already recorded next to their items: G1, I10. Would change what the user reads
+on screen or in the exported report: H2, H5, H7, H9, H11, H13, M2, M3, M4. Needs reference data the
+app does not carry: H14. Moves a reported verdict and needs sign-off: L2, P2, V2. Nothing was ticked
+that was not done.
+
+So the collectors were read again along the path a scan walks — the ones that turn framework calls
+into `SpecField` rows — and three findings cleared the bar. The first was implemented in this run; the
+other two are specified below for the next pass.
+
+- [x] **Z1. A camera service that refused to enumerate was reported as a device with no cameras.**
+  `CameraCollector.collect` read the id list and built every per-camera row inside one `try`. When
+  `CameraManager.cameraIdList` threw, the `catch` emitted the "Camera modules — Not accessible" row
+  and then fell through to the section's summary row, which prints
+  `"${cameras.size} (… rear, … front)"` — **`0 (0 rear, 0 front)`**, as a VERIFIED measurement with
+  HIGH confidence. One report therefore carried both "camera enumeration failed" and "this device has
+  no cameras", and the second is a fact the app never observed: a camera service that is slow, wedged
+  or refusing is not a camera-less device. The same empty `cameras` list feeds the *Cameras enumerated*
+  input of the hardware score, so the false zero also reached a score.
+  *Change:* the enumeration is now its own read — `cameraIds(manager)`, a `CameraManager -> List<String>`
+  constructor parameter that defaults to `it.cameraIdList.asList()`, the same shape as
+  `SystemPropertyReader(dumpLoader)` — so a throw is caught around the read alone and recorded as
+  `enumerationFailure`. The per-id `try`/`catch` and every row it produces are untouched, and so is the
+  "Camera modules — Not accessible / Camera enumeration failed: …" row, which keeps its label, status
+  and wording. The summary row is emitted from one branch: unchanged
+  (`"N (n rear, n front)"`, VERIFIED, HIGH, source `CameraManager.cameraIdList`) when the read answered,
+  and `Unavailable` / `UNVERIFIED` / `Confidence.NONE` with the note
+  "Unreadable: camera enumeration failed: <reason>" when it did not. An exception with no message now
+  names its class instead of printing "null". No file under `ui/` or `res/` is touched: a device whose
+  camera service answers — including one that legitimately reports zero cameras — renders exactly the
+  same rows as before.
+  *Not changed, and deliberately:* the score input is left alone. `DefaultScoreEngine` still scores an
+  empty camera list as 0, so the hardware score on this path is what it was; correcting the score is a
+  reported-value change of the kind M3 and P2 are waiting on sign-off for, and this run only stopped
+  the report from asserting a measurement it never took.
+  *Tests:* 5 in the new `CameraCollectorTest` (Robolectric, API 34), driving the collector through the
+  injected reader. A refused enumeration yields an UNVERIFIED summary row with no measurement and the
+  note naming the reason; the refused section is exactly two rows (`camera.list`, `camera.count`) and
+  the first still reads "Not accessible" / NOT_SUPPORTED / "Camera enumeration failed: binder died";
+  an exception with no message still names `IllegalStateException`; an enumeration that answers with
+  nothing still reports `0 (0 rear, 0 front)` VERIFIED with no note, because that is a measurement; and
+  the summary row keeps its label, group and source on the real Robolectric camera service. Two of the
+  five fail against the previous summary-row logic — checked by restoring it (`if (true)` in place of
+  the branch) and re-running the class: `a refused enumeration is not reported as a device with no
+  cameras` and `an exception with no message still names what failed` both FAILED, then the file was
+  restored and the full suite re-run green.
+  *Not verified:* no device is available, so the throwing read is driven through the injected lambda
+  rather than by a real `CameraManager` that refuses; the per-camera rows (megapixels, sensor array,
+  aperture, focal length, flash, level, pixel size, physical sub-cameras) are not exercised at all,
+  because Robolectric's camera service enumerates no ids and a `CameraCharacteristics` cannot be
+  fabricated for a test.
+  `assembleDebug` green with 0 compiler warnings; **384** unit tests pass (379 before, 5 new);
+  `tools/check-no-ui-change.sh` clean — the diff is one modified production file, one new test file
+  and this entry. Debug APK 9,827,992 bytes, with no size claim: the debug APK is not byte-reproducible
+  on this toolchain, and that figure is also the one recorded under M5 and Y1 for different commits.
+
+- [ ] **Z2. A sensor service that refuses enumeration is reported as a device with no sensors.**
+  `SensorCollector.collect` wraps `manager.getSensorList(Sensor.TYPE_ALL)` in `try`/`catch` that
+  returns `emptyList()`, and the section then emits "Sensors enumerated: `0`" through
+  `FieldBuilder.value` — VERIFIED, HIGH confidence — plus one "Not reported by the sensor service" row
+  for each of the seven expected categories. This is Z1's defect in another collector: a refused or
+  throwing read becomes a measurement of absence, and the empty fact list also reaches
+  *Sensors enumerated* in `DefaultScoreEngine` (which treats an empty list as missing evidence, so the
+  score is not the problem — the row is). *Change:* catch around the `getSensorList` call alone,
+  record the failure, and emit `sensor.count` as `Unavailable`/`UNVERIFIED` with an
+  "Unreadable: sensor enumeration failed: …" note on that path only, exactly as Z1 does for cameras;
+  the seven category rows keep their wording, since "not reported" is still true. *Verify:* a
+  `SensorCollectorTest` that drives a throwing enumeration through an injected reader (same shape as
+  Z1's `cameraIds`), asserting the count row is UNVERIFIED with no value on the failure path and
+  `0`-style VERIFIED when the read answers with an empty list. No visible change on any path that
+  works today.
+
+- [ ] **Z3. A refused audio device list is reported as "no speaker, no microphone".**
+  `AudioCollector.collect` reads `getDevices(GET_DEVICES_OUTPUTS)` and `…INPUTS` in two `try`/`catch`
+  blocks that both collapse to `emptyList()`, and the three presence rows then print
+  "Not reported" for the built-in speaker, earpiece and microphone — a claim of absence drawn from a
+  read that threw. The two list rows ("Audio outputs", "Audio inputs") also fall to `Unavailable`,
+  which is honest, so the section contradicts itself on that path. *Change:* read each list through
+  the `attempt`/`Reading` helper Y1 added to `ConnectivityCollector` (or a local equivalent), emit the
+  presence rows from the values that were actually read, and let a failed read say
+  "Unreadable: …" instead of "Not reported". *Verify:* an `AudioCollectorTest` driving a throwing
+  reader, asserting the presence rows carry no "Not reported" claim when the list read failed, and
+  that a working read still prints "Present"/"Not reported" exactly as today. No visible change on any
+  path that works today.
 
 ## When the list runs out
 
