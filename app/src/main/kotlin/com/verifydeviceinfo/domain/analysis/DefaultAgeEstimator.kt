@@ -103,15 +103,5 @@ class DefaultAgeEstimator : DeviceAgeEstimator {
         )
     }
 
-    private fun parseSecurityPatch(value: String?): Long? {
-        if (value.isNullOrBlank()) return null
-        return try {
-            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
-            cal.clear()
-            cal.set(value.substring(0, 4).toInt(), value.substring(5, 7).toInt() - 1, 1)
-            cal.timeInMillis
-        } catch (e: Exception) {
-            null
-        }
-    }
+    private fun parseSecurityPatch(value: String?): Long? = AnalysisSupport.patchMonthToMillis(value)
 }

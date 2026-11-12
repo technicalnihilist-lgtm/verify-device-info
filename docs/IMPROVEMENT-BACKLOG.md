@@ -2283,6 +2283,60 @@ the audit below, which is implemented in this run.
   (both enabled, both disabled, GPS absent, network absent, one unread plus the other disabled, both
   absent), which is 13 tests in that class, up from 7.
 
+## EE. Audit findings — 12 November run
+
+The eighteen items still open above were re-read against the code before anything new was added, and
+none of them can be finished here. Blocked by this sandbox (F1, F3, I8): `nproc` = 2 and 2,098 MB again,
+this run's cold `assembleDebug` needed eight 300 s calls, and neither `minifyReleaseWithR8` nor
+`lintAnalyzeDebug` finishes inside one call or resumes across calls. Duplicates of work already recorded
+(G1, I10). Need a visible change (H2, H5, H7, H9, H11, H13, M2, M3, M4). Need data the app does not carry
+(H14). Need sign-off because they move a reported verdict (L2, P2) or change what an export can contain
+(V2). Nothing was ticked that was not done.
+
+The patch-level path was then read — the one input that feeds three different consumers — and one finding
+cleared the bar. EE1 was implemented in this run.
+
+- [x] **EE1. A security patch level that is not a real year and month was silently rolled into a
+  different one — in three separate copies of the same parse.** `DefaultIntegrityAnalyzer.parsePatchDays`,
+  `DefaultAgeEstimator.parseSecurityPatch` and the inline block in `DefaultScoreEngine`'s
+  Software-and-security section each built a **lenient** `java.util.Calendar` from
+  `value.substring(0, 4)` and `value.substring(5, 7)` and set the day to 1. `Calendar` rolls an
+  out-of-range field over instead of refusing it, so a patch level the build never published as a date
+  became a plausible one, and always in the direction that flatters the device: measured on JDK 17 with
+  `collectedAt` = the test fixture's fixed clock (2025-06-15), `2024-13-01` read as **2025-01-01**
+  (165 days old, so the Security screen said PASS, "Security patch 2024-13-01 is 165 d old"), `2024-00-15`
+  read as **2023-12-01** (562 days, WARNING), and `2024-99-01` read as **2032-03-01**, a date in the
+  future that `Formatters.daysBetween` floors to zero — a patch from 2032 reported as 0 days old, PASS.
+  Because the three copies were independent, one fix would also have drifted from the other two.
+  *Change:* one shared `AnalysisSupport.patchMonthToMillis(value)` — the same year/month parse, but
+  `isLenient = false`, an explicit `month !in 1..12` refusal, an explicit length guard, and `null` for
+  anything it cannot read — and all three consumers now call it. Only the year and month are read and the
+  day is still pinned to the 1st, so **a valid patch level produces exactly the instant it always did**;
+  this only refuses a value that is not a date, which is the same thing N1 did for reference release
+  dates. A refused value takes the path an absent patch level already took: the Security check reports
+  UNVERIFIED with "No security patch date was reported by the build.", the age estimate reports no
+  `daysSinceSecurityPatch`, and the score excludes the input instead of scoring it 100. The raw string is
+  still printed as the check's evidence (`ro.build.version.security_patch=2024-13-01`), so nothing is
+  hidden from the user — the row still shows what the build claimed, it just no longer invents a date
+  from it. *Tests:* seven in the new `SecurityPatchDateTest`: a full date and a year-month both read as
+  the 1st of their month, the day component does not move the result, months 13/0/99 are refused, and
+  null/blank/short/non-numeric/no-dash forms are refused; then one test per consumer — the integrity
+  check reports UNVERIFIED with the unchanged explanation and evidence for `2024-13-01`, the age estimate
+  reports no patch age for it while a real one still does, and the Software-and-security score for
+  `2024-13-01` equals the score for an absent patch level. *Verified:* `assembleDebug` green (APK
+  9,827,992 bytes), all **410** unit tests pass (403 before, 7 new), and no `ui/` or `res/` file is
+  touched, so no screen, control, style, layout, copy or reported value changes on a device that
+  publishes a real patch level. *Environment note:* Maven Central's redirect target
+  (`gcp.mirrors.maven.org`) answered **502** for the whole of this run, so `testDebugUnitTest` could not
+  resolve Robolectric's `nativeruntime-dist-compat` or its `android-all` jars. A sandbox-local Gradle
+  init script (outside the repository, nothing in the tree changed) pointed Gradle and Robolectric at
+  `maven-central.storage-download.googleapis.com`, which serves the same artefacts. One `android-all`
+  jar arrived truncated through the broken mirror and failed `PermissionManagerTest` with a
+  `NoSuchFieldError` inside Robolectric's own `DeviceConfig`; deleting that jar and letting it re-download
+  made the class pass, and the failure was never in app code. *Not claimed:* nothing about a device that
+  publishes a malformed patch level beyond the above — no device is available here, so the three call
+  sites are verified through the unit tests that drive them, not on hardware.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

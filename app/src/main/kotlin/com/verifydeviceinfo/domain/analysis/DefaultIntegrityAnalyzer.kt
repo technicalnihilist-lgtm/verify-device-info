@@ -268,14 +268,7 @@ class DefaultIntegrityAnalyzer : SystemIntegrityAnalyzer {
     }
 
     private fun parsePatchDays(snapshot: DeviceSnapshot): Long? {
-        val value = snapshot.software.securityPatch ?: return null
-        return try {
-            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
-            cal.clear()
-            cal.set(value.substring(0, 4).toInt(), value.substring(5, 7).toInt() - 1, 1)
-            Formatters.daysBetween(cal.timeInMillis, snapshot.collectedAtMillis)
-        } catch (e: Exception) {
-            null
-        }
+        val patchMillis = AnalysisSupport.patchMonthToMillis(snapshot.software.securityPatch) ?: return null
+        return Formatters.daysBetween(patchMillis, snapshot.collectedAtMillis)
     }
 }

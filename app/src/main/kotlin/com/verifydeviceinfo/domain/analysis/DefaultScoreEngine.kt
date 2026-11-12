@@ -153,16 +153,8 @@ class DefaultScoreEngine : EvidenceAndConfidenceEngine {
         // ---------------- Software and security ----------------
         run {
             val acc = Accumulator()
-            val patchAge = snapshot.software.securityPatch?.let { sp ->
-                try {
-                    val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
-                    cal.clear()
-                    cal.set(sp.substring(0, 4).toInt(), sp.substring(5, 7).toInt() - 1, 1)
-                    Formatters.daysBetween(cal.timeInMillis, snapshot.collectedAtMillis)
-                } catch (e: Exception) {
-                    null
-                }
-            }
+            val patchAge = AnalysisSupport.patchMonthToMillis(snapshot.software.securityPatch)
+                ?.let { Formatters.daysBetween(it, snapshot.collectedAtMillis) }
             acc.add(
                 "Security patch age",
                 3f,

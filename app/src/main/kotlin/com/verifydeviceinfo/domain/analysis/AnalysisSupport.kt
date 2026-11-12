@@ -121,6 +121,42 @@ internal object AnalysisSupport {
     }
 
     /**
+     * A security patch level — `2024-05-05`, or the coarser `2024-05` some vendors publish — as UTC
+     * midnight on the first day of that month, or `null` when it is not a real year and month.
+     *
+     * Only the year and month are read, because a patch level names a bulletin month and the day
+     * component varies by vendor for the same bulletin; the day is pinned to the 1st exactly as the
+     * three copies this replaced pinned it, so a valid value produces the same instant it always did.
+     *
+     * The parse is strict for the same reason [releaseDateToMillis] is. `Calendar` is lenient, so
+     * `2024-13` silently became 1 January 2025 and `2024-00` became 1 December 2023: a patch level
+     * that is not a date was turned into a plausible one, and because a date in the future reads as
+     * "patched recently" (`daysBetween` floors at zero), the invented value could only ever make the
+     * Security screen and the Software-and-security score look *better* than the device earned. A
+     * value the build never published as a date is reported as missing instead, which is the same
+     * UNVERIFIED / excluded-input path an absent patch level already took.
+     */
+    fun patchMonthToMillis(value: String?): Long? {
+        if (value.isNullOrBlank()) return null
+        return try {
+            // `2024-05` is the shortest form that carries both fields; anything shorter has no
+            // month at index 5 and used to throw its way to `null` through `substring`.
+            if (value.length < 7) return null
+            val year = value.substring(0, 4).toInt()
+            val month = value.substring(5, 7).toInt()
+            // Refuse an impossible month before Calendar gets a chance to roll it over.
+            if (month !in 1..12) return null
+            val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+            cal.isLenient = false
+            cal.clear()
+            cal.set(year, month - 1, 1)
+            cal.timeInMillis
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
      * Loose SoC comparison. Android reports part numbers (SM8550) on some builds and marketing
      * names (Snapdragon 8 Gen 2) on others, so both directions are tested before declaring a
      * mismatch — a false "fake chipset" warning is worse than no warning.
