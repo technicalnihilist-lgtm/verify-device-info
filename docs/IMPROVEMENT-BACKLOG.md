@@ -496,6 +496,9 @@ build and tests green before committing.
   *Passed over (12 Nov, second pass):* unchanged — `nproc` = 2, `free` = 2,098 MB, the same host as
   every attempt above. This pass's cold `assembleDebug` needed six 300 s calls before it first went
   green, so the non-resumable `minifyReleaseWithR8` still has no window here.
+  *Passed over (13 Nov run):* unchanged — `nproc` = 2, `free` = 2,098 MB; this run's cold
+  `assembleDebug` needed four 300 s calls, so the non-resumable `minifyReleaseWithR8` still has no
+  window here.
 
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
@@ -552,6 +555,9 @@ build and tests green before committing.
   *Passed over (12 Nov, second pass):* unchanged — same 2 cores / 2,098 MB, and this pass's cold
   `assembleDebug` took six 300 s calls, so a single non-resumable `lintAnalyzeDebug` still cannot be
   finished, and a half-finished analysis still cannot be triaged honestly.
+  *Passed over (13 Nov run):* unchanged — same 2 cores / 2,098 MB, so a single non-resumable
+  `lintAnalyzeDebug` still cannot be finished inside a 300 s call, and a half-finished analysis still
+  cannot be triaged honestly.
 
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
@@ -2437,6 +2443,75 @@ reach the same file at once.
   repository) resolved through `maven-central.storage-download.googleapis.com`, and Robolectric's
   `android-all` jars were fetched through the same mirror via
   `-Drobolectric.dependency.repo.url`. Nothing in the tree was changed for either.
+
+## HH. Audit findings — 13 November run
+
+The eighteen items open at the start of this run were re-read before anything was touched, and each
+was passed over for the reason already recorded against it: **F1** and **F3** are sandbox-bound
+(`nproc` = 2, `free` = 2,098 MB — this run's cold `assembleDebug` needed four 300 s calls, so neither
+the non-resumable `minifyReleaseWithR8` nor `lintAnalyzeDebug` has a window here), and **I8**
+duplicates F3; **G1** and **I10** duplicate measurements already recorded next to their items;
+**H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** would change what the user reads on screen or in the
+exported report; **L2, P2, V2** move a reported verdict and need sign-off. Nothing was ticked that
+was not done.
+
+One finding had already been specified inside an earlier entry and never given an item of its own —
+Z3 recorded it while it was being written, as the same defect in the one read of that file it did not
+cover. It was implemented in this run.
+
+- [x] **HH1. A refused haptics read is reported as a device with no vibration motor.**
+  `AudioCollector.collect` read the vibration motor inside a `try`/`catch` that returned `false`
+  (`VibratorManager.defaultVibrator` from API 31, the deprecated `Vibrator` below it), and the
+  `audio.vibrator` row then printed **"Not reported"** — VERIFIED, HIGH confidence, no note. A
+  vibrator service that throws, or a vendor `Vibrator` implementation that refuses, was therefore
+  reported as a device without a vibration motor, and the `vibratorAvailable` flag carried the same
+  `false` into `AudioFacts`. This is Z3's defect in the last read of the same file: a claim of
+  absence drawn from a read that never answered.
+  *Change:* the read is now its own constructor parameter, `hasVibrator: (Context) -> Boolean`,
+  defaulting to the production path unchanged (the two-branch `VibratorManager`/`Vibrator` lookup,
+  moved as it was), the same shape as Z1's `cameraIds`, Z2's `sensorList` and Z3's
+  `outputDevices`/`inputDevices`. It goes through Y1's `attempt`, so a throw is caught around that one
+  read and keeps its reason. The row is emitted from one branch: unchanged ("Present" /
+  "Not reported", VERIFIED, HIGH, source `Vibrator.hasVibrator()`, no note) when the read answered,
+  and `Unavailable` / UNVERIFIED / `Confidence.NONE` with the note
+  "Unreadable: haptics read failed: <reason>" when it did not. `failureName(...)` — the message, or
+  the class name when there is none — is now shared with `readFailureNote`, whose output for the two
+  device-list rows is byte-identical to before. The `vibratorAvailable` flag keeps its previous value
+  (`false`) on a failed read, so the score on that path is what it was: the same decision Z2 and Z3
+  recorded. No file under `ui/` or `res/` is touched — on a device whose vibrator service answers,
+  every row renders exactly what it rendered before.
+  *Tests:* three in `AudioCollectorTest` (Robolectric, API 34), driven through the injected reader: a
+  refused read yields UNVERIFIED with no measurement, the note "Unreadable: haptics read failed:
+  vibrator service refused" and the flag false; an exception with no message names
+  `IllegalStateException` instead of printing "null"; and a read that answers still prints "Present"
+  (flag true) or "Not reported" (flag false), VERIFIED with no note. **Mutation-checked:** with the
+  previous logic restored (`try { … } catch { false }` plus the unconditional row), exactly the two
+  failure-path tests fail and the seven unchanged-path tests pass; the file was then restored and is
+  byte-identical to the committed one.
+  *Not verified:* no device is available, so the throwing read is driven through the injected lambda
+  rather than by a real `VibratorManager`. Every case injects a reader, so the production lambda
+  itself is not executed by these tests; it is the same two-branch code that was there before, moved
+  into the parameter default, and on API 34 the `VibratorManager` branch is the one it takes.
+  `assembleDebug` green; all **419** unit tests pass (416 before, 3 new), re-executed with `--rerun`
+  rather than taken from the build cache; `tools/check-no-ui-change.sh` reports `OK … (31 files
+  tracked there)` — the diff is one modified production file, one modified test file and this entry.
+  Debug APK 9,827,992 bytes, with no size claim: the debug APK is not byte-reproducible on this
+  toolchain. No timing or size measurement is claimed — the change is on a failure path and removes
+  no work from the healthy one.
+  *Recorded while writing it, not fixed here:* `HardwareCollector.readDisplayFacts` carries the same
+  defect two rows over — a throwing HDR read collapses to `emptyList()` and renders "None reported",
+  and a throwing `isScreenWideColorGamut` collapses to `false` and renders "Not reported"/"No".
+  Correcting it means `DisplayFacts.hdrTypes`/`wideColorGamut` carrying the failure instead of a
+  default, which reaches the two rendering sites in `ui/screens/HardwareScreen.kt`, so it is a
+  UI-file change and belongs to a design pass. It was not added as an item.
+
+*Environment note, not a repository change:* Maven Central's mirror `gcp.mirrors.maven.org` answered
+**502** for `org.robolectric:nativeruntime-dist-compat:1.0.16` again, and Robolectric's test JVM could
+not fetch its runtime over the proxy. The jar and the `android-all-instrumented` jars for API 29, 30,
+33, 34 and 35 were fetched from `maven-central.storage-download.googleapis.com`, the missing
+artefact was served to Gradle through a local file repository in an init script outside the
+repository, and the runtime directory was passed with `ROBOLECTRIC_DEPENDENCY_DIR`, which the build
+already supports. No build file, repository list or dependency in the tree was changed.
 
 ## When the list runs out
 

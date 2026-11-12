@@ -32,7 +32,23 @@ class AudioCollector(
         { it.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList() },
     /** The input list, read the same way; see [outputDevices]. */
     private val inputDevices: (AudioManager) -> List<AudioDeviceInfo> =
-        { it.getDevices(AudioManager.GET_DEVICES_INPUTS).toList() }
+        { it.getDevices(AudioManager.GET_DEVICES_INPUTS).toList() },
+    /**
+     * Reads whether the device has a vibration motor.
+     *
+     * Injectable for the same reason as [outputDevices]: production always goes through the
+     * vibrator service, and only a test can make that read throw. It takes the `Context` rather
+     * than closing over it so the service lookup stays in the lambda, where it already was.
+     */
+    private val hasVibrator: (Context) -> Boolean = { context ->
+        if (Build.VERSION.SDK_INT >= 31) {
+            val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+            manager?.defaultVibrator?.hasVibrator() == true
+        } else {
+            @Suppress("DEPRECATION")
+            (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)?.hasVibrator() == true
+        }
+    }
 ) {
 
     fun collect(): AudioFacts {
@@ -98,21 +114,23 @@ class AudioCollector(
             SpecGroup.AUDIO, "AudioManager.getStreamVolume()"
         )
 
-        val vibratorAvailable = try {
-            if (Build.VERSION.SDK_INT >= 31) {
-                val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                manager?.defaultVibrator?.hasVibrator() == true
-            } else {
-                @Suppress("DEPRECATION")
-                (context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)?.hasVibrator() == true
-            }
-        } catch (e: Exception) {
-            false
+        // A refused haptics read is not a device without a vibration motor. The read used to
+        // collapse to `false` in its own `catch`, which printed "Not reported" for a service that
+        // never answered — the same claim of absence Z3 removed from the three presence rows above.
+        val vibration = attempt { hasVibrator(context) }
+        val vibratorAvailable = vibration.value == true
+        fields += if (vibration.failure != null) {
+            FieldBuilder.value(
+                "audio.vibrator", "Vibration motor", null, SpecGroup.AUDIO, "Vibrator.hasVibrator()",
+                note = "Unreadable: haptics read failed: " + failureName(vibration.failure)
+            )
+        } else {
+            FieldBuilder.value(
+                "audio.vibrator", "Vibration motor",
+                if (vibratorAvailable) "Present" else "Not reported",
+                SpecGroup.AUDIO, "Vibrator.hasVibrator()"
+            )
         }
-        fields += FieldBuilder.value(
-            "audio.vibrator", "Vibration motor", if (vibratorAvailable) "Present" else "Not reported",
-            SpecGroup.AUDIO, "Vibrator.hasVibrator()"
-        )
         fields += FieldBuilder.value(
             "audio.hapticFeedback", "Haptic feedback setting",
             try {
@@ -154,8 +172,11 @@ class AudioCollector(
 
     /** The note a row carries when the device list it was derived from could not be read. */
     private fun readFailureNote(direction: String, failure: Exception): String =
-        "Unreadable: audio $direction device list failed: " +
-            (failure.message ?: failure.javaClass.simpleName)
+        "Unreadable: audio $direction device list failed: " + failureName(failure)
+
+    /** An exception's message, or its class name when it has none, so a note never says "null". */
+    private fun failureName(failure: Exception): String =
+        failure.message ?: failure.javaClass.simpleName
 
     private fun deviceName(device: AudioDeviceInfo): String {
         val type = when (device.type) {

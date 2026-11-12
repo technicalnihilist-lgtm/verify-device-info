@@ -39,8 +39,9 @@ class AudioCollectorTest {
 
     private fun collector(
         outputs: (AudioManager) -> List<AudioDeviceInfo> = { emptyList() },
-        inputs: (AudioManager) -> List<AudioDeviceInfo> = { emptyList() }
-    ) = AudioCollector(context, outputs, inputs)
+        inputs: (AudioManager) -> List<AudioDeviceInfo> = { emptyList() },
+        haptics: (Context) -> Boolean = { false }
+    ) = AudioCollector(context, outputs, inputs, haptics)
 
     @Test
     fun `a refused output list is not reported as a device with no speaker`() {
@@ -122,6 +123,50 @@ class AudioCollectorTest {
         }
         assertFalse(facts.speakerAvailable)
         assertFalse(facts.microphoneAvailable)
+    }
+
+    @Test
+    fun `a refused haptics read is not reported as a device with no vibration motor`() {
+        val facts = collector(haptics = { throw IllegalStateException("vibrator service refused") })
+            .collect()
+
+        val vibrator = row(facts.fields, "audio.vibrator")
+        assertEquals(DiagnosticStatus.UNVERIFIED, vibrator.status)
+        assertEquals(Confidence.NONE, vibrator.confidence)
+        assertEquals("Unavailable", vibrator.value)
+        assertFalse(vibrator.value == "Not reported")
+        assertEquals("Unreadable: haptics read failed: vibrator service refused", vibrator.note)
+        // The score engine reads this flag; a failed read scores what it scored before.
+        assertFalse(facts.vibratorAvailable)
+    }
+
+    @Test
+    fun `a haptics exception with no message still names what failed`() {
+        val facts = collector(haptics = { throw IllegalStateException() }).collect()
+
+        assertEquals(
+            "Unreadable: haptics read failed: IllegalStateException",
+            row(facts.fields, "audio.vibrator").note
+        )
+    }
+
+    @Test
+    fun `a haptics read that answers still says Present or Not reported`() {
+        // The unchanged path: both answers of a read that returned are measurements, and the row
+        // renders exactly what it rendered before this change.
+        val present = collector(haptics = { true }).collect()
+        val presentRow = row(present.fields, "audio.vibrator")
+        assertEquals("Present", presentRow.value)
+        assertEquals(DiagnosticStatus.VERIFIED, presentRow.status)
+        assertNull(presentRow.note)
+        assertTrue(present.vibratorAvailable)
+
+        val absent = collector(haptics = { false }).collect()
+        val absentRow = row(absent.fields, "audio.vibrator")
+        assertEquals("Not reported", absentRow.value)
+        assertEquals(DiagnosticStatus.VERIFIED, absentRow.status)
+        assertNull(absentRow.note)
+        assertFalse(absent.vibratorAvailable)
     }
 
     @Test
