@@ -14,7 +14,6 @@ import com.verifydeviceinfo.domain.analysis.DefaultScoreEngine
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -148,7 +147,10 @@ class JsonExportWriteTest {
             fail("expected the write to fail in a read-only directory")
         } catch (expected: IOException) {
             assertEquals(previous, target.readText())
-            assertFalse(File(exports, "${target.name}.tmp").exists())
+            // Each write takes a temporary file of its own (see `AtomicWriteConcurrencyTest`), so
+            // the check is that none of them survived — not one name in particular.
+            val leftovers = exports.listFiles().orEmpty().map { it.name }.filter { it != target.name }
+            assertEquals("unexpected files next to the export: $leftovers", emptyList<String>(), leftovers)
         } finally {
             exports.setWritable(true, false)
         }

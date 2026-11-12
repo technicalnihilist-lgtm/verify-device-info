@@ -2,7 +2,6 @@ package com.verifydeviceinfo
 
 import com.verifydeviceinfo.data.android.atomicWriteText
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Rule
@@ -67,14 +66,20 @@ class HistoryIndexWriteTest {
         val target = indexFile()
         folder.newFolder("history")
         target.writeText("""[{"id":"kept"}]""")
-        // Block the temporary file path with a directory so the write cannot even open.
-        assertTrue(File(target.parentFile, "index.json.tmp").mkdir())
+        // Make the directory unwritable so the temporary file cannot be created at all. The
+        // obstruction has to be the directory and not one temporary name: every write now takes a
+        // temporary file of its own, so no single name can block it (see
+        // `AtomicWriteConcurrencyTest`, which is the reason for that).
+        val directory = target.parentFile!!
+        assertTrue(directory.setWritable(false, false))
 
         try {
             atomicWriteText(target, "replacement")
             fail("expected the write to fail")
         } catch (expected: Exception) {
             // The point of the test is what the target looks like afterwards.
+        } finally {
+            directory.setWritable(true, false)
         }
 
         assertEquals("""[{"id":"kept"}]""", target.readText())
@@ -85,14 +90,15 @@ class HistoryIndexWriteTest {
         val target = indexFile()
         folder.newFolder("history")
         target.writeText("old")
-        val blocker = File(target.parentFile, "index.json.tmp")
-        assertTrue(blocker.mkdir())
+        val directory = target.parentFile!!
+        assertTrue(directory.setWritable(false, false))
         runCatching { atomicWriteText(target, "new") }
 
-        assertTrue(blocker.delete())
+        assertTrue(directory.setWritable(true, false))
         atomicWriteText(target, "new")
 
         assertEquals("new", target.readText())
-        assertFalse(File(target.parentFile, "index.json.tmp").exists())
+        val leftovers = directory.listFiles()!!.map { it.name }.filter { it != "index.json" }
+        assertEquals(emptyList<String>(), leftovers)
     }
 }

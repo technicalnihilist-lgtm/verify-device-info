@@ -14,7 +14,6 @@ import com.verifydeviceinfo.domain.analysis.DefaultScoreEngine
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -33,8 +32,11 @@ import java.io.File
  * is not listed", leaving the previous index exactly as it was and the new report file on disk for
  * the next successful save to account for.
  *
- * The obstruction is the one `HistoryIndexWriteTest` already uses: the temporary sibling the
- * crash-safe write goes through is a directory, so the write cannot even open it.
+ * The obstruction is the directory the index lives in: it is made read-only, so the temporary
+ * sibling the crash-safe write goes through cannot be created in it at all. The obstruction is
+ * deliberately not one temporary *name* — every write now takes a temporary file of its own (see
+ * `AtomicWriteConcurrencyTest`), so no single name can block it. The report directory is a
+ * subdirectory and stays writable, which is what keeps this test about the index alone.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -48,9 +50,6 @@ class HistoryIndexFailureTest {
 
     private val reportsDir: File get() = File(historyDir, "reports")
 
-    /** The path `atomicWriteText` uses for the index's temporary sibling. */
-    private val indexBlocker: File get() = File(historyDir, "index.json.tmp")
-
     @Before
     fun setUp() {
         historyDir.deleteRecursively()
@@ -59,7 +58,7 @@ class HistoryIndexFailureTest {
 
     @After
     fun tearDown() {
-        indexBlocker.setWritable(true, true)
+        historyDir.setWritable(true, true)
         historyDir.deleteRecursively()
     }
 
@@ -85,10 +84,22 @@ class HistoryIndexFailureTest {
     private fun storedReports(): List<String> =
         reportsDir.listFiles()?.map { it.name }.orEmpty().sorted()
 
+    /**
+     * Makes `history/` read-only, so no temporary file can be created beside the index. The report
+     * directory is created first and is unaffected: writing into `history/reports/` needs write
+     * permission on that directory, not on its parent.
+     */
     private fun blockIndexWrite() {
         assertTrue(historyDir.mkdirs() || historyDir.isDirectory)
-        assertTrue("could not obstruct the index write", indexBlocker.mkdir())
+        assertTrue(reportsDir.mkdirs() || reportsDir.isDirectory)
+        assertTrue("could not obstruct the index write", historyDir.setWritable(false, false))
     }
+
+    /** Anything left in `history/` other than the index and the report directory. */
+    private fun strayFiles(): List<String> =
+        historyDir.listFiles()?.map { it.name }.orEmpty()
+            .filter { it != "index.json" && it != "reports" }
+            .sorted()
 
     @Test
     fun `an index that cannot be written does not fail the save`() = runBlocking {
@@ -117,7 +128,7 @@ class HistoryIndexFailureTest {
             listOf("${first.id}.json", "${second.id}.json").sorted(),
             storedReports()
         )
-        assertFalse(File(historyDir, "index.json.tmp").isFile)
+        assertEquals("a blocked index write left a file behind", emptyList<String>(), strayFiles())
     }
 
     @Test
@@ -126,7 +137,7 @@ class HistoryIndexFailureTest {
         blockIndexWrite()
         val orphan = history.save(report(), reportPath = null)
         assertTrue("the orphan was not stored", File(reportsDir, "${orphan.id}.json").isFile)
-        assertTrue("could not clear the obstruction", indexBlocker.delete())
+        assertTrue("could not clear the obstruction", historyDir.setWritable(true, false))
 
         val third = history.save(report(), reportPath = null)
 

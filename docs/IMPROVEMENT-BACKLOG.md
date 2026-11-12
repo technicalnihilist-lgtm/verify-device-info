@@ -2388,6 +2388,56 @@ collector that was missed.
   the five `android-all` jars to Robolectric's offline resolver. Every number above was taken with
   that workaround in place.
 
+## GG. Audit findings — 12 November run (third pass)
+
+The eighteen items still open above were re-read first, in order, and every one of them is still
+blocked for the reason already written beside it: this sandbox (F1, F3, I8 — `nproc` = 2,
+`free` = 2,098 MB, where this pass's cold build took several 300 s calls and neither
+`minifyReleaseWithR8` nor `lintAnalyzeDebug` is resumable), duplication of a measurement that
+already lives next to its item (G1, I10), a visible change (H2, H5, H7, H9, H11, H13, M2, M3, M4),
+data the app does not carry (H14), or a decision that moves a reported verdict (L2, P2, V2). So the
+code was read again with the same lens, and one finding cleared the bar: the crash-safe write's
+temporary file was shared between writers, which is the one place in the app where two taps can
+reach the same file at once.
+
+- [x] **GG1. Two writers of one export could spoil it.** `atomicWriteText` derived its temporary
+  sibling's name from the target's (`<name>.tmp`), so two writers of the same target opened the
+  **same** temporary file. Whichever renamed first moved that inode out from under the other; the
+  other then kept writing through its open descriptor into what was already the finished target —
+  appending the rest of its own document past the end of a complete one — and finally failed its
+  own rename with "could not replace …". The JSON export is exactly this case:
+  `AppViewModel.exportJson` launches a coroutine per tap and both taps write
+  `cacheDir/verify-device-info-report.json`, so a double tap on "Export JSON" was two writers of one
+  file, and the file the user then shared could be one document with a second document's tail stuck
+  on it. *Change:* the temporary file is created with
+  `File.createTempFile("${file.name}.", ".tmp", dir)`, so every write owns its own name, created
+  exclusively, in the target's own directory — a rename inside one directory is still atomic.
+  Everything else is byte-for-byte as before: the same flush and `fd.sync()`, the same rename over
+  the target, the same deletion of the temporary file when anything fails, and the same behaviour
+  when the directory cannot be created at all. Two writers still race to rename; the last complete
+  document wins, which is the only outcome this helper ever promised. *Tests:* new
+  `AtomicWriteConcurrencyTest` releases six writers from a barrier, each writing a distinct 200 KB
+  payload to the same target, ten rounds over: every writer must return, the target must be exactly
+  one writer's payload end to end, and no temporary file may survive. Against the previous code it
+  fails at round 0 with `java.io.IOException: could not replace verify-device-info-report.json`;
+  against this change it passes. A second test pins the single-writer case (exact bytes, no
+  leftovers). Three existing tests obstructed the write by creating a directory *at* the old
+  temporary name, which now blocks nothing: `HistoryIndexWriteTest` ×2 make the index's directory
+  read-only instead, `HistoryIndexFailureTest` ×3 do the same for `history/` after creating
+  `history/reports/` (so the report write is untouched and those tests stay about the index alone),
+  and `JsonExportWriteTest`'s leftover check now asserts that no file survives rather than one
+  particular name. *Verified:* `assembleDebug` green (debug APK 9,827,992 bytes); all **416** unit
+  tests pass (414 before, 2 new), run as four filtered batches because one `testDebugUnitTest` over
+  the whole suite does not finish inside a single 300 s call here; `tools/check-no-ui-change.sh`
+  reports `OK … (31 files tracked there)`. No screen, control, style, layout, copy or reported value
+  changes. *Not claimed:* nothing about a real handset — the race is reproduced on the JVM
+  filesystem, which is the same `rename(2)` semantics Android uses, and the fix does not depend on
+  the platform either way. *Environment note:* Maven Central's redirect target
+  `gcp.mirrors.maven.org` answered **502** again, so a sandbox-local Gradle init script (outside the
+  repository) resolved through `maven-central.storage-download.googleapis.com`, and Robolectric's
+  `android-all` jars were fetched through the same mirror via
+  `-Drobolectric.dependency.repo.url`. Nothing in the tree was changed for either.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

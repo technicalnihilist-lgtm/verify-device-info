@@ -153,6 +153,16 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
  * renamed over [target]. A rename inside one directory is atomic, so a reader sees either the
  * complete previous contents or the complete new contents — never half of either. If anything
  * fails the temporary file is removed and [target] is left exactly as it was.
+ *
+ * The temporary file belongs to one writer only. Its name used to be derived from the target's
+ * (`<name>.tmp`), so two writers of the same file opened the same temporary file: whichever
+ * renamed first moved that inode out from under the other, which then kept writing through its
+ * open descriptor into what was already the finished target — appending the rest of its own
+ * document past the end of a complete one — and finally failed its own rename with "could not
+ * replace". The exported report a user then shared was one document with a second document's
+ * tail stuck on it. `createTempFile` gives each writer its own name and creates it exclusively,
+ * so a name cannot be taken between choosing it and opening it either. Two writers still race to
+ * rename, but the last complete document wins, which is the only outcome this helper promises.
  */
 internal fun atomicWriteText(target: File, content: String) {
     val file = target.absoluteFile
@@ -160,7 +170,7 @@ internal fun atomicWriteText(target: File, content: String) {
     if (!dir.exists() && !dir.mkdirs() && !dir.exists()) {
         throw IOException("could not create ${dir.name}")
     }
-    val temp = File(dir, "${file.name}.tmp")
+    val temp = File.createTempFile("${file.name}.", ".tmp", dir)
     try {
         FileOutputStream(temp).use { out ->
             out.write(content.toByteArray(Charsets.UTF_8))
