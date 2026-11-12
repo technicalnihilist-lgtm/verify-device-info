@@ -2,6 +2,7 @@ package com.verifydeviceinfo.data.android.collect
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
@@ -15,7 +16,17 @@ import com.verifydeviceinfo.core.util.Formatters
 import java.util.Locale
 
 /** Installed software inventory, uptime and thermal state. */
-class SoftwareCollector(private val context: Context) {
+class SoftwareCollector(
+    private val context: Context,
+    /**
+     * Reads the installed package list.
+     *
+     * Injectable only so the read-failure path can be driven by a test without a device:
+     * production always uses `PackageManager.getInstalledPackages(0)`.
+     */
+    private val installedPackages: (PackageManager) -> List<PackageInfo> =
+        { it.getInstalledPackages(0) }
+) {
 
     fun collect(): Pair<SoftwareFacts, List<SpecField>> {
         val fields = mutableListOf<SpecField>()
@@ -23,36 +34,49 @@ class SoftwareCollector(private val context: Context) {
 
         var systemCount = 0
         var userCount = 0
-        var visible = true
+        var readFailure: String? = null
         try {
-            val packages = pm.getInstalledPackages(0)
-            packages.forEach { info ->
+            installedPackages(pm).forEach { info ->
                 val isSystem = (info.applicationInfo?.flags ?: 0) and
                     ApplicationInfo.FLAG_SYSTEM != 0
                 if (isSystem) systemCount++ else userCount++
             }
         } catch (e: Exception) {
-            visible = false
+            readFailure = e.message ?: e.javaClass.simpleName
         }
 
         val visibilityRestricted = Build.VERSION.SDK_INT >= 30
 
+        // A refused enumeration is not a device with no installed apps. The `catch` above used to
+        // leave both counters at zero, and the three rows below then printed "0" — a measurement of
+        // absence drawn from a read that never answered, carrying the confidence of a direct
+        // verification. This is the camera, sensor and audio defect (Z1, Z2, Z3) in the software
+        // section: the rows now report the read failure instead of a count. A list that did answer,
+        // even with nothing in it, still reports its real numbers.
+        val countsReadable = readFailure == null
+        val readFailureNote = readFailure?.let { "Unreadable: package list failed: $it" }
+
         fields += FieldBuilder.value(
             "software.packageCount", "Installed apps visible to this app",
-            (systemCount + userCount).toString(), SpecGroup.SOFTWARE_INVENTORY,
+            if (countsReadable) (systemCount + userCount).toString() else null,
+            SpecGroup.SOFTWARE_INVENTORY,
             "PackageManager.getInstalledPackages()",
-            note = if (visibilityRestricted) {
+            note = readFailureNote ?: if (visibilityRestricted) {
                 "Android 11+ hides other apps unless they are declared in the manifest queries element " +
                     "or the app holds QUERY_ALL_PACKAGES. This count is therefore a lower bound."
             } else null
         )
         fields += FieldBuilder.value(
-            "software.systemPackages", "System apps", systemCount.toString(),
-            SpecGroup.SOFTWARE_INVENTORY, "PackageManager application flags"
+            "software.systemPackages", "System apps",
+            if (countsReadable) systemCount.toString() else null,
+            SpecGroup.SOFTWARE_INVENTORY, "PackageManager application flags",
+            note = readFailureNote
         )
         fields += FieldBuilder.value(
-            "software.userPackages", "User-installed apps", userCount.toString(),
-            SpecGroup.SOFTWARE_INVENTORY, "PackageManager application flags"
+            "software.userPackages", "User-installed apps",
+            if (countsReadable) userCount.toString() else null,
+            SpecGroup.SOFTWARE_INVENTORY, "PackageManager application flags",
+            note = readFailureNote
         )
 
         val uptime = SystemClock.elapsedRealtime()
@@ -138,7 +162,7 @@ class SoftwareCollector(private val context: Context) {
             installedPackageCount = systemCount + userCount,
             systemPackageCount = systemCount,
             userPackageCount = userCount,
-            packageVisibilityRestricted = visibilityRestricted && visible,
+            packageVisibilityRestricted = visibilityRestricted && countsReadable,
             uptimeMillis = uptime,
             bootTimeMillis = bootTime,
             thermalStatus = thermalStatus,

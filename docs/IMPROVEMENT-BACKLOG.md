@@ -493,6 +493,9 @@ build and tests green before committing.
   needed six 300 s calls before it went green (and `testDebugUnitTest` needed three more), so a task
   that has to finish inside one call and restarts from zero when it is killed still has no window
   here. Not retried again for the same reason as the three attempts on 7-8 November.
+  *Passed over (12 Nov, second pass):* unchanged — `nproc` = 2, `free` = 2,098 MB, the same host as
+  every attempt above. This pass's cold `assembleDebug` needed six 300 s calls before it first went
+  green, so the non-resumable `minifyReleaseWithR8` still has no window here.
 
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
@@ -546,6 +549,9 @@ build and tests green before committing.
   this pass's 300 s calls, so the analysis still cannot be finished or triaged honestly.
   *Passed over (11 Nov run):* unchanged — same 2 cores / 2,098 MB, and this run's cold `assembleDebug`
   took seven 300 s calls, so a non-resumable `lintAnalyzeDebug` still cannot be finished or triaged.
+  *Passed over (12 Nov, second pass):* unchanged — same 2 cores / 2,098 MB, and this pass's cold
+  `assembleDebug` took six 300 s calls, so a single non-resumable `lintAnalyzeDebug` still cannot be
+  finished, and a half-finished analysis still cannot be triaged honestly.
 
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
@@ -2336,6 +2342,51 @@ cleared the bar. EE1 was implemented in this run.
   made the class pass, and the failure was never in app code. *Not claimed:* nothing about a device that
   publishes a malformed patch level beyond the above — no device is available here, so the three call
   sites are verified through the unit tests that drive them, not on hardware.
+
+## FF. Audit findings — 12 November run (second pass)
+
+The eighteen items still open above were re-read first, in order, and every one of them is still
+blocked for the reason already written beside it: this sandbox (F1, F3, I8 — 2 cores, 2,098 MB, where
+a cold `assembleDebug` alone took six 300 s calls this pass and neither `minifyReleaseWithR8` nor
+`lintAnalyzeDebug` is resumable), duplication of a measurement that already lives next to its item
+(G1, I10), a visible change (H2, H5, H7, H9, H11, H13, M2, M3, M4), data the app does not carry
+(H14), or a decision that moves a reported verdict (L2, P2, V2). So the code was read again with the
+same lens, and one finding cleared the bar: a read that never answered, published as a measurement of
+absence. It is the same defect Z1, Z2 and Z3 fixed for cameras, sensors and audio, in the one
+collector that was missed.
+
+- [x] **FF1. A refused package list is reported as a device with no installed apps.**
+  `SoftwareCollector.collect` wrapped `PackageManager.getInstalledPackages(0)` in a `try` whose
+  `catch` only flipped a local `visible` flag, leaving both counters at zero; the three rows built
+  from those counters then published `"Installed apps visible to this app: 0"`, `"System apps: 0"` and
+  `"User-installed apps: 0"` — three VERIFIED values with HIGH confidence and DIRECTLY_VERIFIED
+  provenance, on a device whose package list was never read. The only note attached said the count
+  was a lower bound because Android 11 hides other apps, which is a claim about a count that was
+  taken. A `PackageManager` that throws (a wedged system server, a vendor build with a broken package
+  service, a `RemoteException` from the Binder) therefore produced a clean-looking software section
+  and a `packageVisibilityRestricted = false` fact that nothing had measured. *Change:* the read is a
+  constructor parameter (`(PackageManager) -> List<PackageInfo>`, defaulting to the same
+  `getInstalledPackages(0)`) so the failure can be driven by a test, the `catch` records the reason
+  instead of flipping a flag, and the three rows report no value with `"Unreadable: package list
+  failed: <reason>"` when the read threw. A list that answered — including an empty one — reports
+  exactly what it read, byte for byte as before, and `packageVisibilityRestricted` is now derived from
+  "the read succeeded", which is what it always meant. No new row, label, note on a readable device,
+  screen, control, style or layout: the only difference is on a device whose package list cannot be
+  read at all, where a false "0 apps" becomes "Unavailable" plus the reason. Four tests in
+  `SoftwareCollectorTest`: a refused list, an exception with no message, a list that answers (2 system
+  + 1 user → "3"/"2"/"1", VERIFIED, the lower-bound note still present) and an empty but answered
+  list (still "0", so the failure path cannot swallow a genuine zero). *Verified:* `assembleDebug`
+  green, debug APK **9,931,821 → 9,932,153 bytes** (+332, measured back to back with the change
+  stashed and restored on the same tree), all **414** unit tests pass (410 before, 4 new),
+  `tools/check-no-ui-change.sh` reports `OK … (31 files tracked there)`. *Not claimed:* nothing about a
+  real handset — no device is available here, so the failure path is verified through the injected
+  read, and the success path through the same injection plus the untouched production default.
+  *Environment note:* the whole of this pass, `gcp.mirrors.maven.org` — where Maven Central redirects —
+  answered **502**, so neither Gradle's `nativeruntime-dist-compat` nor Robolectric's `android-all`
+  jars could be fetched from it. A sandbox-local Gradle init script (outside the repository; nothing in
+  the tree changed) resolved both through `maven-central.storage-download.googleapis.com` and handed
+  the five `android-all` jars to Robolectric's offline resolver. Every number above was taken with
+  that workaround in place.
 
 ## When the list runs out
 
