@@ -12,17 +12,46 @@ import java.util.Locale
 internal object AnalysisSupport {
 
     /**
-     * Compiled once for the life of the process. `Regex` compiles its pattern in the constructor,
-     * and [normalise] runs in tight loops over model, brand and SoC strings during a scan, so
-     * rebuilding the pattern per call dominated the cost of normalising a short string.
+     * Compiled once for the life of the process, for the token splitting in [socMatches].
+     *
+     * `Regex` compiles its pattern in the constructor, so a pattern rebuilt per call dominated the
+     * cost of splitting a short string. [normalise] no longer uses a pattern at all — see there.
      */
-    private val nonAlphanumeric = Regex("[^a-z0-9]")
-
-    /** Same reasoning as [nonAlphanumeric], for the token splitting in [socMatches]. */
     private val nonAlphanumericRuns = Regex("[^a-z0-9]+")
 
-    fun normalise(value: String?): String =
-        value.orEmpty().lowercase(Locale.US).replace(nonAlphanumeric, "")
+    /**
+     * Uppercase-or-lowercase-insensitive, alphanumerics only: the form every comparison in this file
+     * works on.
+     *
+     * This used to be `lowercase(Locale.US).replace(Regex("[^a-z0-9]"), "")`. The pattern was
+     * cached, but `Regex.replace` still built a `Matcher` and a result string on every call, and
+     * [normalise] runs in tight loops over model, brand and SoC strings during a scan — twice per
+     * brand comparison, once per reference entry at load, once per SoC comparison. The filter is now
+     * a character loop, and a string that is already clean (a lowercase brand like `samsung`, which
+     * is the common case) is returned without building anything at all.
+     *
+     * The result is character-for-character what the regex produced: `lowercase` still runs first, so
+     * a mapping that changes the length (`İ` → `i̇`) is filtered exactly as before, and the kept set is
+     * still `a`-`z` and `0`-`9` only — every other character, including non-ASCII letters and
+     * digits in another script, is dropped.
+     */
+    fun normalise(value: String?): String {
+        val lowered = value.orEmpty().lowercase(Locale.US)
+        var clean = true
+        for (index in lowered.indices) {
+            val character = lowered[index]
+            if ((character < 'a' || character > 'z') && (character < '0' || character > '9')) {
+                clean = false
+                break
+            }
+        }
+        if (clean) return lowered
+        val filtered = StringBuilder(lowered.length)
+        for (character in lowered) {
+            if ((character in 'a'..'z') || (character in '0'..'9')) filtered.append(character)
+        }
+        return filtered.toString()
+    }
 
     /** Brand families where the marketing brand legitimately differs from the manufacturer. */
     val brandAliases: Map<String, Set<String>> = mapOf(

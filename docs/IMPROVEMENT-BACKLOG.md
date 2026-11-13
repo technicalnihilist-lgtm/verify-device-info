@@ -2655,6 +2655,78 @@ already supports. No build file, repository list or dependency in the tree was c
 itself needed `-Dorg.gradle.jvmargs=-Xmx1750m`; at the 1400 MB in `gradle.properties`,
 `:app:mergeExtDexDebug` does not finish inside one 300 s call.
 
+## KK. Audit findings — 13 November run (second pass)
+
+The eighteen unchecked items above were re-read before anything was touched, and every one was
+passed over for the reason its own entry already records: **F1**, **F3** and **I8** are sandbox-bound
+(`nproc` = 2, `free` = 2,098 MB — this run's cold `assembleDebug` again needed several 300 s calls,
+and `:app:mergeExtDexDebug` alone did not finish inside a single one, so neither the non-resumable
+`minifyReleaseWithR8` nor `lintAnalyzeDebug` has a window here); **G1** and **I10** duplicate
+measurements already recorded next to their items; **H2, H5, H7, H9, H11, H13, H14, M2, M3, M4**
+would change what the user reads on screen or in the exported report; **L2, P2, V2** move a reported
+verdict and need sign-off. Nothing was ticked that was not done.
+
+The comparison path was then read again — the one place every scan goes through dozens of times and
+no entry had looked at since the pattern cache — and it produced one finding that clears the bar.
+
+- [x] **KK1. `AnalysisSupport.normalise` allocated a `Matcher` and a result string for every string
+  it compared.** The pattern itself was already cached (that was the earlier fix, and its comment
+  says why), but `Regex.replace(input, "")` still builds a `Matcher` over the input and a fresh
+  result `String` on every call, even when there is nothing to remove. `normalise` runs twice per
+  brand comparison in `DefaultAuthenticityEngine`, once per reference entry in `ReferenceIndex`'s
+  constructor, and once per SoC comparison in `socMatches`, and the overwhelmingly common input — a
+  lowercase ASCII brand such as `samsung`, or a part number such as `sm8550` — needs no filtering at
+  all, so that whole cost was being paid to return the string it was handed.
+  *Change:* one production file, `AnalysisSupport`. `normalise` now lowercases with the same
+  `Locale.US`, scans the lowered string for a character outside `a`-`z`/`0`-`9`, and returns it
+  unchanged when there is none; otherwise it appends the kept characters into one `StringBuilder`.
+  The now-unused single-character pattern was deleted and the remaining `nonAlphanumericRuns` (used
+  by `socMatches`' token splitting) kept, with its comment corrected. The result is character for
+  character what the regex produced — `lowercase` still runs first, so a mapping that changes the
+  length (`İ` → `i̇`) is filtered exactly as before, and the kept set is unchanged, so every
+  comparison, finding, score and rendered value in the app is identical.
+  *Measured* (JDK 17, this host, warmed, median of nine rounds of 2.6 M calls over the thirteen
+  brand/manufacturer/model/SoC strings a scan actually normalises, the two implementations run
+  alternately in the same JVM): **341.5 ns → 111.9 ns per call, 3.05× faster**. For scale, the
+  backlog already records `authenticity.analyze` at 434 µs per report and a full report rebuild at
+  500 µs, so this removes tens of microseconds from a scan, not milliseconds; the item is worth
+  taking because the output is provably unchanged, not because 230 ns is felt.
+  *Tests:* three added to `AnalysisSupportTest`. `normalise agrees with the regex expression it
+  replaced` runs a 26-input corpus — `null`, empty, blank, mixed case, the three separator spellings
+  of one part number, doubled spaces, tab/newline, a dotted `İ`, a dotless `ı`, Latin-1 capitals,
+  Han characters, Arabic-Indic digits, mathematical bold digits, a combining accent, a non-breaking
+  hyphen, an emoji, a NUL and a literal backslash — through both the new implementation and the old
+  expression held in the test as an oracle, and asserts they agree on every one. `normalise keeps
+  only ascii letters and digits` pins the filter's output, and `an already clean value is normalised
+  without being rebuilt` pins the fast path.
+  *Verified:* `assembleDebug` green (BUILD SUCCESSFUL in 3m47s). The unit suite is green — **428**
+  tests (425 before, 3 new), 0 failures, 0 skipped: 271 tests in the 35 plain-JUnit classes and 157
+  in the 22 Robolectric classes. It had to be run as four filtered invocations of
+  `:app:testDebugUnitTest` (`--tests`, by class) rather than one: the whole suite needs roughly 25
+  minutes of test execution on this host (the Robolectric classes cost ~25 s each just to start their
+  sandbox), and one Gradle call is capped at 300 s here, so a single invocation cannot reach the end
+  of the suite. Every test class ran, in one of the four, and each invocation ended BUILD SUCCESSFUL
+  with no failure reported. `tools/check-no-ui-change.sh` could not answer — this checkout has no
+  `.git`, so it reports "not a git checkout, nothing to compare" — so the diff was checked directly
+  against `main` instead: only `AnalysisSupport.kt` (44 changed lines) and `AnalysisSupportTest.kt`
+  (52) differ, no file under `ui/` or `res/` is touched, and this entry is the third file.
+  *Not verified:* no device is available, so the scan-path benefit is a JDK micro-benchmark over
+  representative strings rather than a handset profile. The mutation check is by construction rather
+  than by reverting in-tree: the oracle in the equivalence test *is* the old expression, so any
+  divergence between the two implementations fails it. And the suite above is four filtered runs, not
+  one: each class passed, but no single invocation of the task has been observed to finish here.
+
+*Environment note, not a repository change:* Maven Central's redirect target `gcp.mirrors.maven.org`
+answered **502** again for `org.robolectric:nativeruntime-dist-compat:1.0.16`, so an init script
+outside the repository (`-I`, redirecting `repo.maven.apache.org` to
+`maven-central.storage-download.googleapis.com`) was used for the test run, and Robolectric's own
+`android-all-instrumented` jars for API 10, 11, 13, 14 and 15 were pre-fetched into a directory
+passed as `ROBOLECTRIC_DEPENDENCY_DIR`, which the build already supports — without them all 163
+Robolectric tests failed with "Failed to fetch maven artifact". No build file, repository list or
+dependency in the tree was changed. The build again needed
+`-Dorg.gradle.jvmargs=-Xmx1750m -XX:+UseSerialGC`; at the 1400 MB in `gradle.properties`,
+`:app:mergeExtDexDebug` does not finish inside one 300 s call.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

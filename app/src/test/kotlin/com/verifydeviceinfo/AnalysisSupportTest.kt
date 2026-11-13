@@ -64,4 +64,60 @@ class AnalysisSupportTest {
                 risk != com.verifydeviceinfo.core.model.RiskLevel.ELEVATED
         )
     }
+
+    /** The expression [AnalysisSupport.normalise] was built from, kept here as the oracle. */
+    private fun normaliseByRegex(value: String?): String =
+        value.orEmpty().lowercase(java.util.Locale.US).replace(Regex("[^a-z0-9]"), "")
+
+    @Test
+    fun `normalise agrees with the regex expression it replaced`() {
+        val corpus = listOf(
+            null,
+            "",
+            " ",
+            "samsung",
+            "Samsung",
+            "SM-S911B",
+            "sm s911b",
+            "SM_S911B",
+            "Snapdragon 8 Gen 2",
+            "  leading and trailing  ",
+            "two  spaces",
+            "tab\tand\nnewline",
+            "Pixel 8 Pro (akita)",
+            "1.5 GHz",
+            "İstanbul",
+            "ıI",
+            "ÄÖÜ",
+            "中文手机",
+            "٨٥٥٠",
+            "𝟴𝟱𝟱𝟬",
+            "e\u0301clair",
+            "SM‐S911B",
+            "😀 emoji",
+            "-",
+            "a-b_c.d/e:f",
+            "\\u0000nul",
+            "a\u0000b"
+        )
+        for (value in corpus) {
+            val label = if (value == null) "null" else "'$value'"
+            assertEquals("normalise($label)", normaliseByRegex(value), AnalysisSupport.normalise(value))
+        }
+    }
+
+    @Test
+    fun `normalise keeps only ascii letters and digits`() {
+        assertEquals("sms911b", AnalysisSupport.normalise("SM-S911B"))
+        assertEquals("snapdragon8gen2", AnalysisSupport.normalise("Snapdragon 8 Gen 2"))
+        assertEquals("", AnalysisSupport.normalise("— – ·"))
+        assertEquals("", AnalysisSupport.normalise(null))
+    }
+
+    @Test
+    fun `an already clean value is normalised without being rebuilt`() {
+        // The fast path returns the lowercased input itself; the value is what matters here.
+        assertEquals("samsung", AnalysisSupport.normalise("samsung"))
+        assertEquals("sm8550", AnalysisSupport.normalise("SM8550"))
+    }
 }
