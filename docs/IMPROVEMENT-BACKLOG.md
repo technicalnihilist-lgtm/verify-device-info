@@ -2582,6 +2582,79 @@ repository in an init script outside the repository, and Robolectric's `android-
 jars for API 29, 30, 33, 34 and 35 were passed with `ROBOLECTRIC_DEPENDENCY_DIR`, which the build
 already supports. No build file, repository list or dependency in the tree was changed.
 
+## JJ. Audit findings — 13 November run
+
+The eighteen unchecked items above are still blocked here, for the reasons their own entries record.
+Blocked by this sandbox (F1, F3, I8): `nproc` = 2 and 2,098 MB again, so neither
+`:app:minifyReleaseWithR8` nor `:app:lintAnalyzeDebug` fits inside one 300 s call or resumes across
+calls. Duplicates of work already recorded (G1, I10). Need a visible change (H2, H5, H7, H9, H11,
+H13, M2, M3, M4). Need data the app does not carry (H14). Need sign-off because they move a reported
+verdict or a rendered value (L2, P2, V2).
+
+So the collection path was read again, and it produced one finding that clears the bar: a static
+field that only exists from API 31, read before the level that guards it. Two further findings from
+the same pass are recorded here for a design pass, because each changes a value a user reads and
+neither may be done under the UI freeze:
+
+- *For sign-off:* `BatteryCollector` renders `BATTERY_PROPERTY_ENERGY_COUNTER` as `"%.0f mWh"` from
+  `energyCounter / 1000.0`, but the platform documents that property in **nanowatt-hours**, so the
+  "Energy counter" row is a thousand times too large on every device that reports it. The fix is
+  `it / 1_000_000.0` (or a unit of its own); it changes a rendered value, so it needs the same
+  decision H1 and K3 took.
+- *For sign-off:* `DefaultScoreEngine` still scores "Cameras enumerated" as `0` when
+  `hardware.cameras` is empty, and `AndroidDeviceInformationProvider` fills that list with
+  `emptyList()` both for a device with no cameras and for a camera stage that failed or timed out —
+  the Z1 defect one layer below the field that Z1 fixed. Scoring it as missing evidence (as the
+  sensor input beside it already does) moves the Hardware health score, so it needs sign-off.
+
+- [x] **JJ1. `IdentityCollector` read the API-31 SoC fields before checking the API level, so the
+  whole scan threw `NoSuchFieldError` below Android 12.** `Build.SOC_MANUFACTURER` and
+  `Build.SOC_MODEL` are static fields added in API 31, and a static field is resolved when its
+  instruction executes, not when the class is loaded. The two rows were built as
+  `Build.SOC_MANUFACTURER.takeIf { Build.VERSION.SDK_INT >= 31 }`: the receiver is evaluated before
+  `takeIf` is called, so the field was read first and the predicate that was meant to guard it ran
+  only afterwards. On API 26-30 that read throws `NoSuchFieldError`, which is an `Error`:
+  `StageTimer.run` catches `Exception`, so the identity stage did not fail gracefully, and
+  `AppViewModel.scan` catches `Exception` too, so the scan coroutine died and the process with it.
+  With `minSdk` 26 that is every Android 8, 9, 10 and 11 device, on every scan. The same two values
+  were read correctly ninety lines below, in the `DeviceIdentity` construction
+  (`if (Build.VERSION.SDK_INT >= 31) Build.SOC_MANUFACTURER else null`), which is the shape the rows
+  now use too.
+  *Change:* one production file, `IdentityCollector.collect`. A single `val socFieldsAvailable =
+  Build.VERSION.SDK_INT >= 31` is evaluated first, the two values are read behind it, and the field
+  rows and the `DeviceIdentity` both use those locals, so the level is checked in one place and can
+  no longer be checked after the read. On API 31+ the rows carry exactly what they carried before
+  (`takeIf { SDK_INT >= 31 }` and `if (SDK_INT >= 31) … else null` return the same value); below 31
+  they carry the same `"Unavailable"` value and the same `"Requires Android 12 (API 31) or newer."`
+  note they already had. No label, copy, layout, control or ordering changed, and no row was added
+  or removed.
+  *Tests:* three new in `IdentityCollectorApiLevelTest`, the first test in the suite to call
+  `IdentityCollector.collect()` at all. `the identity section survives a platform without the SoC
+  fields` (sdk 29) asserts all thirteen identity rows are produced and that collection runs on to
+  `software.buildTime`; `below API 31 the SoC rows are unavailable and say why` (sdk 29) pins the
+  value, the `UNVERIFIED` status, the note and the two `DeviceIdentity` values; `from API 31 the SoC
+  rows are read rather than gated` (sdk 34) asserts the "requires Android 12" note is absent on a
+  platform that has the field. **Mutation-checked:** with the old `takeIf` expression restored, the
+  two sdk-29 tests fail with `java.lang.NoSuchFieldError` at the `collect()` call and the sdk-34
+  test passes — the crash reproduced, and only the two rows' construction decides it. The
+  production file was then restored and is the committed one (sha256 `87caf1b3…6a16b`).
+  *Verified:* `assembleDebug` green, debug APK 9,827,992 bytes — byte-identical to the baseline I5
+  records, the change adds no code to the APK's hot path and no resource; all **425** unit tests
+  pass (422 before, 3 new) in one `testDebugUnitTest` run of 4m27s. The diff is one production file,
+  one new test file and this entry; `ui/` and `res/` are untouched.
+  *Not verified:* no device is available, so the crash was reproduced on Robolectric's API 29 and 34
+  runtime jars rather than on an Android 8-11 handset. The sdk-29 jar does not carry the field,
+  which is what makes the reproduction faithful to a real API 26-30 framework.
+
+*Environment note, not a repository change:* Maven Central's redirect target `gcp.mirrors.maven.org`
+answered **502** again for `org.robolectric:nativeruntime-dist-compat:1.0.16`. The jar was fetched
+from `maven-central.storage-download.googleapis.com` and served to Gradle through a local file
+repository in an init script outside the repository, and Robolectric's `android-all-instrumented`
+jars for API 29, 30, 33, 34 and 35 were passed with `ROBOLECTRIC_DEPENDENCY_DIR`, which the build
+already supports. No build file, repository list or dependency in the tree was changed. The build
+itself needed `-Dorg.gradle.jvmargs=-Xmx1750m`; at the 1400 MB in `gradle.properties`,
+`:app:mergeExtDexDebug` does not finish inside one 300 s call.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

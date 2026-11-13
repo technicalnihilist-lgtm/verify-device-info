@@ -66,15 +66,26 @@ class IdentityCollector(private val props: SystemPropertyReader) {
             "identity.fingerprint", "Build fingerprint", Build.FINGERPRINT, SpecGroup.IDENTITY,
             "android.os.Build.FINGERPRINT", Confidence.HIGH
         )
+        // `Build.SOC_MANUFACTURER` and `Build.SOC_MODEL` are static fields that only exist from
+        // API 31, and a static field is resolved when its instruction executes — not when the
+        // class is loaded. `Build.SOC_MANUFACTURER.takeIf { SDK_INT >= 31 }` therefore read the
+        // field *first* and threw `NoSuchFieldError` on Android 8-11, before the predicate that
+        // was supposed to guard it ever ran. That is an `Error`, so neither `StageTimer.run` nor
+        // `AppViewModel.scan` (`catch (e: Exception)`) contained it: the identity stage died, the
+        // scan coroutine died with it, and on a device below API 31 the whole app crashed on every
+        // scan. The level is checked first now, the shape the `DeviceIdentity` below already used.
+        val socFieldsAvailable = Build.VERSION.SDK_INT >= 31
+        val socManufacturer = if (socFieldsAvailable) Build.SOC_MANUFACTURER else null
+        val socModel = if (socFieldsAvailable) Build.SOC_MODEL else null
         fields += FieldBuilder.value(
-            "identity.socManufacturer", "SoC manufacturer", Build.SOC_MANUFACTURER.takeIf { Build.VERSION.SDK_INT >= 31 },
+            "identity.socManufacturer", "SoC manufacturer", socManufacturer,
             SpecGroup.PROCESSOR, "android.os.Build.SOC_MANUFACTURER",
-            note = if (Build.VERSION.SDK_INT < 31) "Requires Android 12 (API 31) or newer." else null
+            note = if (!socFieldsAvailable) "Requires Android 12 (API 31) or newer." else null
         )
         fields += FieldBuilder.value(
-            "identity.socModel", "SoC model", Build.SOC_MODEL.takeIf { Build.VERSION.SDK_INT >= 31 },
+            "identity.socModel", "SoC model", socModel,
             SpecGroup.PROCESSOR, "android.os.Build.SOC_MODEL",
-            note = if (Build.VERSION.SDK_INT < 31) "Requires Android 12 (API 31) or newer." else null
+            note = if (!socFieldsAvailable) "Requires Android 12 (API 31) or newer." else null
         )
         fields += if (serial != null) {
             FieldBuilder.value(
@@ -163,8 +174,8 @@ class IdentityCollector(private val props: SystemPropertyReader) {
             buildUser = Build.USER,
             buildTimeMillis = Build.TIME,
             serial = serial,
-            socManufacturer = if (Build.VERSION.SDK_INT >= 31) Build.SOC_MANUFACTURER else null,
-            socModel = if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else null
+            socManufacturer = socManufacturer,
+            socModel = socModel
         )
 
         return IdentityResult(identity, fields, softwareFields)
