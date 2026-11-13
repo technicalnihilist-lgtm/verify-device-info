@@ -12,6 +12,10 @@ import org.junit.Test
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * The file lifecycle of the PDF export.
@@ -99,13 +103,12 @@ class PdfWriteLifecycleTest {
 
     @Test
     fun `a build that throws leaves no report file behind`() {
-        file.writeText("stale report from an earlier export")
-
         try {
             export(build = { throw IllegalStateException("layout failed") })
             fail("the export should have rethrown the build failure")
         } catch (expected: IllegalStateException) {
             assertFalse("a failed export left ${file.absolutePath} behind", file.exists())
+            assertEquals("a failed export left a temporary file behind", emptyList<String>(), leftovers())
         }
     }
 
@@ -116,9 +119,130 @@ class PdfWriteLifecycleTest {
             fail("the export should have rethrown the write failure")
         } catch (expected: IOException) {
             assertFalse("a half-written report was left at ${file.absolutePath}", file.exists())
+            assertEquals("a failed export left a temporary file behind", emptyList<String>(), leftovers())
         }
 
         assertEquals("the document must be closed exactly once", 1, calls.count { it == "close" })
+    }
+
+    @Test
+    fun `a completed export leaves no temporary file beside the target`() {
+        export()
+
+        assertEquals("%PDF-1.4", file.readText())
+        assertEquals("a completed export left a temporary file behind", emptyList<String>(), leftovers())
+    }
+
+    /**
+     * The failure path used to delete the target itself, so an export that failed took the previous
+     * complete report with it. The bytes now reach the target only by a rename of a complete
+     * document, so a failure has nothing at the target to clean up.
+     */
+    @Test
+    fun `a failed export keeps the previous complete report`() {
+        val previous = "%PDF-1.4 a complete earlier export"
+        file.writeText(previous)
+
+        try {
+            export(writeTo = { throw IOException("no space left on device") })
+            fail("the export should have rethrown the write failure")
+        } catch (expected: IOException) {
+            assertEquals(
+                "a failed export must leave the earlier complete report alone",
+                previous,
+                file.readText()
+            )
+            assertEquals("a failed export left a temporary file behind", emptyList<String>(), leftovers())
+        }
+    }
+
+    /**
+     * Two taps on "Export PDF" are two exports of one path: the button is not disabled while an
+     * export runs, and the view model launches a coroutine per tap. Each export now streams into its
+     * own temporary file and renames it over the target, so the target is always either absent or
+     * exactly one export's document.
+     *
+     * The old path handed the target straight to a `FileOutputStream`, which made it visible and
+     * empty at the first byte and then grew in place: a share sheet that opened it in that window
+     * read a truncated report, and a second export truncating under the first left the two
+     * documents interleaved. The reader below watches the target for exactly that window, and each
+     * export emits its bytes in chunks with a pause between them so the window is wide enough to be
+     * observed rather than merely possible.
+     */
+    @Test
+    fun concurrentExportsOfOneFileNeverInterleave() {
+        val writers = 4
+        val payloads = (0 until writers).map { index ->
+            // Distinct first and last bytes and distinct lengths, so neither an interleaved
+            // document nor a truncated one can match any payload.
+            "%PDF-1.4 ${('a' + index)}".toByteArray() +
+                ByteArray(PAYLOAD_BYTES + index * 4_096) { ('0' + index).code.toByte() } +
+                "${('A' + index)}".toByteArray()
+        }
+        repeat(ROUNDS) { round ->
+            directory.listFiles()?.forEach { it.delete() }
+
+            val barrier = CyclicBarrier(writers)
+            val failures = CopyOnWriteArrayList<Throwable>()
+            val incomplete = CopyOnWriteArrayList<String>()
+            val done = AtomicBoolean(false)
+            val reader = Thread {
+                while (!done.get()) {
+                    val seen = if (file.exists()) runCatching { file.readBytes() }.getOrNull() else null
+                    if (seen != null && seen.isNotEmpty() && payloads.none { it.contentEquals(seen) }) {
+                        incomplete += "${seen.size} bytes, which is no export's document"
+                        break
+                    }
+                    Thread.sleep(1)
+                }
+            }
+            val threads = payloads.map { payload ->
+                Thread {
+                    try {
+                        barrier.await(30, TimeUnit.SECONDS)
+                        // No shared `calls` list here: the default lambdas would append to it from
+                        // four threads at once, and the point of this test is the file.
+                        writePdfFile(file, {}, {}, { out ->
+                            var offset = 0
+                            while (offset < payload.size) {
+                                val length = minOf(CHUNK_BYTES, payload.size - offset)
+                                out.write(payload, offset, length)
+                                out.flush()
+                                offset += length
+                                Thread.sleep(2)
+                            }
+                        }, {})
+                    } catch (t: Throwable) {
+                        failures += t
+                    }
+                }
+            }
+            reader.start()
+            threads.forEach { it.start() }
+            threads.forEach { it.join(60_000) }
+            done.set(true)
+            reader.join(30_000)
+
+            assertTrue(
+                "round $round: an export of the same file failed: ${failures.firstOrNull()}",
+                failures.isEmpty()
+            )
+            assertTrue(
+                "round $round: the target was readable as a partial document: ${incomplete.firstOrNull()}",
+                incomplete.isEmpty()
+            )
+            val written = file.readBytes()
+            assertTrue(
+                "round $round: the target is not any export's document — ${written.size} bytes, " +
+                    "interleaved or truncated",
+                payloads.any { it.contentEquals(written) }
+            )
+            assertEquals(
+                "round $round: a temporary file was left behind: ${leftovers()}",
+                emptyList<String>(),
+                leftovers()
+            )
+        }
     }
 
     @Test
@@ -137,5 +261,15 @@ class PdfWriteLifecycleTest {
         } catch (thrown: Throwable) {
             assertSame("cleanup replaced the original failure", original, thrown)
         }
+    }
+
+    /** Every file in the directory except the target: any of them is a temporary file. */
+    private fun leftovers(): List<String> =
+        directory.listFiles()?.map { it.name }.orEmpty().filter { it != file.name }.sorted()
+
+    private companion object {
+        const val PAYLOAD_BYTES = 200_000
+        const val CHUNK_BYTES = 32 * 1024
+        const val ROUNDS = 6
     }
 }

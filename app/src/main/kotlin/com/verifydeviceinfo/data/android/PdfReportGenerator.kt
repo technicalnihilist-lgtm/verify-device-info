@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 
 /**
  * Vector PDF report. Text is drawn with PdfDocument rather than rasterised, so the export is
@@ -438,11 +439,14 @@ internal fun wrapText(
  * pages it breaks away from, so the page still open at the end has to be finished by
  * [finishLastPage] *before* [writeTo] runs. The document is closed on every path — a failed build
  * leaves a page open, which makes `close()` itself refuse, so the page is finished first and any
- * cleanup failure is swallowed rather than allowed to replace the exception already in flight. A
- * file that could not be completed is deleted, because a truncated report would otherwise be
- * shared as if it were whole.
+ * cleanup failure is swallowed rather than allowed to replace the exception already in flight.
+ *
+ * The bytes reach the target through [writeFileAtomically], so a truncated report can never sit at
+ * the path a share reads: the target is only ever replaced by a rename of a complete document. The
+ * function is no longer `inline`: it hands [writeTo] to a non-inline helper, which an inline
+ * parameter cannot be passed to, and nothing here depends on the lambda being inlined.
  */
-internal inline fun writePdfFile(
+internal fun writePdfFile(
     file: File,
     build: () -> Unit,
     finishLastPage: () -> Unit,
@@ -452,14 +456,51 @@ internal inline fun writePdfFile(
     try {
         build()
         finishLastPage()
-        FileOutputStream(file).use(writeTo)
+        writeFileAtomically(file, writeTo)
         return file
-    } catch (t: Throwable) {
-        file.delete()
-        throw t
     } finally {
         runCatching { finishLastPage() }
         runCatching { closeDocument() }
+    }
+}
+
+/**
+ * Writes [write]'s bytes to [file] through a temporary sibling that is renamed over it.
+ *
+ * The export used to hand the target straight to `FileOutputStream`, which made the PDF the last
+ * write in the app that was neither atomic nor per-writer — the same defect the JSON export had
+ * before `atomicWriteText` was fixed. "Export PDF" is not disabled while an export runs and
+ * [com.verifydeviceinfo.ui.AppViewModel.exportPdf] launches a coroutine per tap, so a double tap was
+ * two `PdfDocument.writeTo` calls streaming into one file: whichever finished last decided where the
+ * other's pages had already been written, and the document the user then shared was two reports
+ * interleaved. A single export interrupted part-way left the same kind of damage — a truncated PDF
+ * at the path the share sheet reads — and the old failure path answered that by deleting the target,
+ * which also deleted a complete report an earlier export had just written.
+ *
+ * Every write now owns a temporary file, created exclusively in the target's own directory so the
+ * rename stays inside one filesystem, flushed and synced before it replaces the target. A failed
+ * write removes only its own temporary file, so the previous complete export survives untouched.
+ * Two writers still race to rename; the last complete document wins, which is the only outcome this
+ * helper promises.
+ */
+internal fun writeFileAtomically(file: File, write: (java.io.OutputStream) -> Unit) {
+    val target = file.absoluteFile
+    val dir = target.parentFile ?: throw IOException("no parent directory for ${target.name}")
+    if (!dir.exists() && !dir.mkdirs() && !dir.exists()) {
+        throw IOException("could not create ${dir.name}")
+    }
+    val temp = File.createTempFile("${target.name}.", ".tmp", dir)
+    try {
+        FileOutputStream(temp).use { out ->
+            write(out)
+            out.flush()
+            out.fd.sync()
+        }
+        if (!temp.renameTo(target)) throw IOException("could not replace ${target.name}")
+    } catch (t: Throwable) {
+        // Only clean up a partial temporary file; anything else at that path is not ours to remove.
+        runCatching { if (temp.isFile) temp.delete() }
+        throw t
     }
 }
 

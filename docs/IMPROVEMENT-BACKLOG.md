@@ -2513,6 +2513,75 @@ artefact was served to Gradle through a local file repository in an init script 
 repository, and the runtime directory was passed with `ROBOLECTRIC_DEPENDENCY_DIR`, which the build
 already supports. No build file, repository list or dependency in the tree was changed.
 
+## II. Audit findings — 13 November run (second pass)
+
+The eighteen items open at the start of this run were re-read before anything was touched, and each
+was passed over for the reason already recorded against it: **F1**, **F3** and **I8** are
+sandbox-bound (`nproc` = 2, `free` = 2,098 MB — this run's cold `assembleDebug` again needed several
+300 s calls, and `:app:mergeExtDexDebug` alone took 3m40s with a warm configuration cache, so neither
+the non-resumable `minifyReleaseWithR8` nor `lintAnalyzeDebug` has a window here); **G1** and **I10**
+duplicate measurements already recorded next to their items; **H2, H5, H7, H9, H11, H13, H14, M2,
+M3, M4** would change what the user reads on screen or in the exported report; **L2, P2, V2** move a
+reported verdict and need sign-off. Nothing was ticked that was not done.
+
+The export path was then re-read against the crash-safety work of the last two runs (T1, O1, M5,
+GG1), and one write in it was still outside every one of those fixes.
+
+- [x] **II1. The PDF export writes the target in place, so two exports of one file spoil it.**
+  `writePdfFile` handed the target straight to `FileOutputStream(file)` and let `PdfDocument.writeTo`
+  stream into it. That made the PDF the last write in the app that was neither atomic nor per-writer:
+  the JSON export was given a temporary sibling and a rename by GG1, the history index by O1, but the
+  PDF still wrote in place. "Export PDF" is not disabled while an export runs and
+  `AppViewModel.exportPdf` launches a coroutine per tap, so a double tap was two `writeTo` calls
+  truncating and growing one file — the two documents interleaved, and whichever writer finished last
+  decided what the rest of the file said. A single export interrupted part-way left the same damage
+  from the other direction: a truncated PDF sitting at the path the share sheet reads. The failure
+  path answered that by deleting the target, which also deleted a *complete* report that an earlier
+  export had just written.
+  *Change:* a new `writeFileAtomically(file, write)` streams the bytes into
+  `File.createTempFile("${target.name}.", ".tmp", dir)` — created exclusively, in the target's own
+  directory so the rename stays inside one filesystem — flushes, `fd.sync()`s, and renames it over
+  the target. A failure deletes only its own temporary file, so the previous complete export survives
+  untouched and the target is never observable half-written. `writePdfFile` now calls it in place of
+  the `FileOutputStream(file).use(writeTo)` line and its `file.delete()`; the rest of the lifecycle is
+  unchanged — `build` → `finishLastPage` → write → return the target, with `finishLastPage` and
+  `closeDocument` still run exactly once in the `finally`. `writePdfFile` lost its `inline` modifier,
+  because it now passes its `writeTo` parameter to a non-inline function; nothing depended on the
+  inlining. Same flush, same sync, same rename-over-target semantics `atomicWriteText` already
+  promises for the JSON export; `atomicWriteText` itself was not touched.
+  *Tests:* three new in `PdfWriteLifecycleTest` and two existing ones tightened.
+  `concurrentExportsOfOneFileNeverInterleave` releases four exports from a barrier, each emitting a
+  payload of a distinct length in 32 KB chunks with a pause between them, while a reader thread polls
+  the target and records any content that is neither empty nor exactly one export's document; over six
+  rounds every writer must return, the reader must never see a partial document, the target must be
+  exactly one payload end to end, and no temporary file may survive. `a failed export keeps the
+  previous complete report` pins that a failed write leaves an earlier complete export byte-identical
+  (this is the deliberate behaviour change: the old code deleted it). `a completed export leaves no
+  temporary file beside the target` pins the success path's cleanup. `a build that throws leaves no
+  report file behind` and `a write that throws leaves no partial file behind` keep their verdicts and
+  now also assert that no temporary file is left. **Mutation-checked:** with the old in-place write
+  restored (`FileOutputStream(target).use(write)`), exactly those three tests fail —
+  `concurrentExportsOfOneFileNeverInterleave` with "the target was readable as a partial document",
+  the other two on the target's contents — and the seven unchanged-path tests pass; the production
+  file was then restored and is byte-identical to the committed one (sha256 `09f49d6f…3e59`).
+  *Verified:* `assembleDebug` green, debug APK 9,827,992 bytes (unchanged from the baseline I5
+  records — the change adds no code to the APK's hot path and no resource); all **422** unit tests
+  pass (419 before, 3 new) in one `testDebugUnitTest` run of 4m11s; `tools/check-no-ui-change.sh`
+  reports `OK … (31 files tracked there)`. The diff is one production file, one test file and this
+  entry. No screen, control, style, layout, copy, reported value or export content changes: the bytes
+  written are the same bytes, only the path they reach the target by differs.
+  *Not verified:* no device is available, so `PdfDocument.writeTo` itself is still only exercised on
+  the JVM through the fake writer this test file has always used; the rename is `File.renameTo`
+  inside one directory, the same `rename(2)` semantics `atomicWriteText` relies on. Nothing is claimed
+  about export speed — the sync adds one flush per export, which was not timed here.
+
+*Environment note, not a repository change:* Maven Central's redirect target `gcp.mirrors.maven.org`
+answered **502** again for `org.robolectric:nativeruntime-dist-compat:1.0.16`. The jar was fetched
+from `maven-central.storage-download.googleapis.com` and served to Gradle through a local file
+repository in an init script outside the repository, and Robolectric's `android-all-instrumented`
+jars for API 29, 30, 33, 34 and 35 were passed with `ROBOLECTRIC_DEPENDENCY_DIR`, which the build
+already supports. No build file, repository list or dependency in the tree was changed.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
