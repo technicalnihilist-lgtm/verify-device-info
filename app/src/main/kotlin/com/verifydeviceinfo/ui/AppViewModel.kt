@@ -11,6 +11,7 @@ import com.verifydeviceinfo.core.model.DiagnosticSession
 import com.verifydeviceinfo.core.model.HistoryEntry
 import com.verifydeviceinfo.core.model.ReferenceMatch
 import com.verifydeviceinfo.core.model.ScanProgress
+import com.verifydeviceinfo.core.util.LatestRequest
 import com.verifydeviceinfo.core.util.ScanCoordinator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,6 +56,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * collector cannot lock the app out of rescanning. See [ScanCoordinator].
      */
     private val scans = ScanCoordinator(viewModelScope)
+
+    /** Orders the history screen's stored-report reads; see [loadRawReport]. */
+    private val rawReportRequests = LatestRequest()
 
     fun scan(useMockData: Boolean = false) {
         scans.start { generation ->
@@ -227,8 +231,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Reads a stored report's JSON and hands it to [onLoaded].
+     *
+     * Only the newest request may publish. Expanding one history entry and then another used to
+     * leave both reads in flight with nothing ordering their completions, so the slower read for
+     * the entry the user had moved away from could land last and be rendered inside the entry now
+     * open — one stored report shown under another entry's heading. The ticket is taken before the
+     * read starts, so it records the order the taps happened in rather than the order the disk
+     * answered in, and a superseded read is simply dropped.
+     */
     fun loadRawReport(id: String, onLoaded: (String?) -> Unit) {
-        viewModelScope.launch { onLoaded(container.history.loadRaw(id)) }
+        val request = rawReportRequests.begin()
+        viewModelScope.launch {
+            val text = container.history.loadRaw(id)
+            if (rawReportRequests.isCurrent(request)) onLoaded(text)
+        }
     }
 
     /**

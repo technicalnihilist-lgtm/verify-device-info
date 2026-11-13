@@ -2770,6 +2770,80 @@ the bar.
   subsets covering all 57 test classes, every one green. No device was available, so the retry is
   not exercised against a real wedged `getprop`; the injected-loader tests are the evidence.
 
+## MM. Audit findings — 14 November run
+
+The eighteen unchecked items above were re-read first, and every one is still blocked for the reason
+its own entry already records: **F1**, **F3** and **I8** are sandbox-bound (`nproc` = 2,
+`free` = 2,098 MB; this run's cold `assembleDebug` still needed eight 300 s calls, so the
+non-resumable `minifyReleaseWithR8` and `lintAnalyzeDebug` have no window); **G1** and **I10**
+duplicate measurements already recorded next to their items; **H2, H5, H7, H9, H11, H13, H14, M2,
+M3, M4** would change what the user reads on screen or in the exported report; **L2, P2, V2** move a
+reported verdict and need sign-off. Nothing was ticked that was not done.
+
+Two genuine findings came out of re-reading the reporting paths. The first one is a race in a read
+the history screen drives, which changes no rendering and is fixed here. The other two are recorded
+below and left open, because each changes a value the user reads.
+
+- [x] **MM1. A stored report read that had been superseded still published its result.**
+  `AppViewModel.loadRawReport` read a history entry's JSON and handed it straight to its callback:
+  `viewModelScope.launch { onLoaded(container.history.loadRaw(readId)) }`. Expanding one history card
+  and then another left two reads in flight with nothing ordering their completions, so the read for
+  the entry the user had already moved away from could finish last and be stored as the expanded
+  text. `HistoryScreen` renders `json` only for the card whose id is currently expanded, which hides
+  the harmless case — but when the *other* entry is open, the stale text is exactly what that card
+  shows: one stored report rendered under another entry's heading, with that entry's model, scores
+  and risk level sitting above a different device's JSON.
+  *Change:* a new `core/util/LatestRequest` — a ticket counter whose `begin()` is synchronous and
+  whose `isCurrent(ticket)` is true only for the newest ticket — and `loadRawReport` now takes a
+  ticket before starting the read and publishes only if that ticket is still the newest. The ticket
+  is taken by the caller, so it records the order the taps happened in, not the order the disk
+  answered in; a superseded read is dropped and never becomes current again, whether the newer read
+  succeeds, fails or is still running. `LatestRequest` deliberately launches and cancels nothing —
+  `ScanCoordinator` owns that for scans, where a superseded request has a job to cancel; here the
+  read belongs to the caller's own scope and the only question is whether its answer is still
+  wanted. No file under `res/` changed, `ui/AppViewModel.kt` is the gate's one listed non-rendering
+  UI file, and no screen, control, style, layout or copy changed.
+  *Tests:* `LatestRequestTest` (6 cases: first ticket current, a newer ticket supersedes immediately,
+  a superseded ticket never revives however many later tickets are taken, tickets are distinct and
+  increasing, only the newest of four outstanding tickets is current, a ticket never issued is not
+  current) and `HistoryRawReportOrderTest` (3 cases against the real view model and the real
+  file-backed history, with two reports actually stored: a superseded read never publishes and the
+  newest one does, an uncontested read still publishes its own report, and with two requests the
+  last tap decides what is shown — exactly one delivery). The tests wait on the delivery count and
+  then pump the looper for a further 3 s to give the superseded read its chance to arrive late, so
+  "it never published" is an observation, not an assumption.
+  *Verification:* `assembleDebug` green and **all 442 unit tests pass in a single
+  `testDebugUnitTest` invocation** (433 before, 9 new; 59 classes). The debug APK grows from
+  **9,900,786 to 9,901,050 bytes (+264)** for the ticket counter, measured by building the tree with
+  the change removed and then with it restored. `tools/check-no-ui-change.sh` reports
+  `OK — nothing under ui/ or res/ differs from HEAD (31 files tracked there)`.
+  *Not verified:* no device is available, and the read latency on a real handset is what makes the
+  race likely in the first place; the tests drive the ordering with the ticket taken before either
+  read can answer, which is the mechanism, not a reproduction of a slow SD card.
+
+- [ ] **MM2. `Formatters.duration` counts the same days twice.** `duration` splits the day count
+  with `years = days / 365`, `months = (days % 365) / 30` and then `remainingDays = days % 30` —
+  the last one takes the remainder of the *original* count, not of what the months already
+  accounted for. Every value that is not a whole year reports more time than it was given: 365 days
+  renders as "1 y 0 mo 5 d" (370 days), 400 days as "1 y 1 mo 10 d" (405), 730 days as
+  "2 y 0 mo 10 d" (740). It is rendered on the Age screen, in the PDF export and in the JSON export,
+  for model age, firmware age, ownership age, estimated usage age and patch age.
+  *Change:* `remainingDays = (days % 365) % 30`. *Needs sign-off:* every duration the app shows
+  changes on any device older than a year, which is a reported-value change of the same class M3,
+  M4 and P2 are waiting on — not a drive-by edit under this freeze.
+
+- [ ] **MM3. The Performance score treats an unread core count as a six-core device.**
+  `DefaultScoreEngine` scores `"CPU cores"` with
+  `if (hardware.cpuCores >= 8) 100 else if (hardware.cpuCores >= 6) 80 else 60`, so `cpuCores == 0`
+  — what `AndroidDeviceInformationProvider` substitutes when the hardware stage timed out or failed,
+  and what `HardwareFacts` carries when nothing filled it — earns 60 and renders as "0 cores". That
+  contradicts the engine's own first rule ("a missing value is removed from both numerator and
+  denominator, and lowers coverage"), and it lets a failed read contribute a passing input to the
+  Performance score instead of reducing its coverage.
+  *Change:* pass `null` when `cpuCores <= 0`, so the input is dropped and coverage falls. *Needs
+  sign-off:* it moves the Performance score and the input list the user reads on a device whose
+  hardware stage failed.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
