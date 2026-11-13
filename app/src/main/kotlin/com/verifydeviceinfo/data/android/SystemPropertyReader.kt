@@ -15,9 +15,11 @@ import java.util.concurrent.TimeUnit
  * android.os.SystemProperties, which the platform may block depending on target SDK.
  * Every accessor is optional — callers must handle null.
  *
- * The dump is parsed at most once per instance, so a single instance must be shared by every
- * caller in a scan (see [com.verifydeviceinfo.AppContainer]): a second instance means a second
- * `getprop` process and a second parse of the same ~900 lines.
+ * A successful dump is parsed at most once per instance, so a single instance must be shared by
+ * every caller in a scan (see [com.verifydeviceinfo.AppContainer]): a second instance means a
+ * second `getprop` process and a second parse of the same ~900 lines. An attempt that produced no
+ * dump — the process was killed at its deadline, or could not be started at all — is not cached
+ * as a permanent answer: the next read tries again, up to [MAX_LOAD_ATTEMPTS] times in total.
  *
  * [dumpLoader] exists so the parse-once behaviour and the line parser can be unit-tested without
  * a device; production code uses the default, which shells out to `getprop`.
@@ -32,18 +34,39 @@ class SystemPropertyReader(
 
     private val cache = ConcurrentHashMap<String, String>()
 
+    /**
+     * Set only once a dump has actually been parsed. A failed attempt deliberately leaves it
+     * false: an attempt that produced nothing is not evidence that the dump does not exist, and
+     * this reader is shared by the whole process (see [com.verifydeviceinfo.AppContainer]), so
+     * caching the failure would leave every later property read on the reflection fallback for
+     * the life of the app.
+     */
     @Volatile
     private var loaded = false
 
+    /**
+     * Attempts made so far. Touched only while holding this instance's monitor. It is what keeps
+     * a permanently broken `getprop` from being re-run on every property read: at most
+     * [MAX_LOAD_ATTEMPTS] tries, then the reader settles on the reflection fallback for good.
+     */
+    private var attempts = 0
+
     @Synchronized
     private fun loadDump() {
-        if (loaded) return
-        loaded = true
-        try {
-            cache.putAll(dumpLoader())
+        if (loaded || attempts >= MAX_LOAD_ATTEMPTS) return
+        attempts++
+        val dump = try {
+            dumpLoader()
         } catch (ignored: Throwable) {
-            // getprop unavailable — reflection below may still work.
+            // getprop unavailable this time — reflection below may still work, and a later read
+            // may still get the dump.
+            return
         }
+        // Nothing parsed: the process was killed at the deadline or answered with no lines. Leave
+        // `loaded` false so a later read tries again, within the attempt cap above.
+        if (dump.isEmpty()) return
+        cache.putAll(dump)
+        loaded = true
     }
 
     private val reflectGet: Method? by lazy {
@@ -86,6 +109,14 @@ class SystemPropertyReader(
          * device while keeping a wedged `getprop` from blocking a scan.
          */
         internal const val DUMP_DEADLINE_MS = 2_000L
+
+        /**
+         * How many times one reader may run `getprop` before it settles on the reflection fallback.
+         * A transient failure is worth retrying; a `getprop` that is permanently unavailable is not,
+         * and retrying it on every property read would cost up to a deadline each time. Three tries
+         * bound the whole process at about three deadlines, spent only while the dump is broken.
+         */
+        internal const val MAX_LOAD_ATTEMPTS = 3
 
         /** Grace given to the reader thread, and to the process, to finish once killed. */
         private const val DUMP_DRAIN_GRACE_MS = 250L

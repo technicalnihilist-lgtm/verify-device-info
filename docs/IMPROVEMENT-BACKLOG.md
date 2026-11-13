@@ -2727,6 +2727,49 @@ dependency in the tree was changed. The build again needed
 `-Dorg.gradle.jvmargs=-Xmx1750m -XX:+UseSerialGC`; at the 1400 MB in `gradle.properties`,
 `:app:mergeExtDexDebug` does not finish inside one 300 s call.
 
+## LL. Audit findings — 13 November run (third pass)
+
+The eighteen unchecked items above were re-read before anything was touched, and every one was
+passed over for the reason its own entry already records: **F1**, **F3** and **I8** are sandbox-bound
+(`nproc` = 2, `free` = 2,098 MB — `:app:mergeExtDexDebug` and `:app:compileDebugKotlin` each still
+need more than one 300 s call here, so the non-resumable `minifyReleaseWithR8` and `lintAnalyzeDebug`
+have no window); **G1** and **I10** duplicate measurements already recorded next to their items;
+**H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** would change what the user reads on screen or in the
+exported report; **L2, P2, V2** move a reported verdict and need sign-off. Nothing was ticked that
+was not done.
+
+The property reader was then read again — it is the one object every scan touches from every
+collector, and its failure path had never been looked at — and it produced one finding that clears
+the bar.
+
+- [x] **LL1. A failed `getprop` load was cached as the permanent answer.** `SystemPropertyReader`
+  set `loaded = true` *before* running the loader, so the first attempt was also the last: a
+  `dumpLoader` that threw, or a dump that came back empty because `getprop` was killed at
+  `DUMP_DEADLINE_MS`, left `cache` empty and `loaded` true for good. `AppContainer` builds one
+  reader per process, so one transient failure — a property service busy during boot, a wedged
+  `getprop` on the first scan — pushed every later property read in the app onto the reflection
+  fallback, which `SystemProperties` does not guarantee under the hidden-API policy the app targets.
+  The class doc's "parsed at most once" was about cost, not about treating a failure as a fact.
+  *Change:* one production file, `SystemPropertyReader`. `loaded` is now set only after a dump has
+  actually been parsed, and an attempt that produced nothing leaves it false so a later read tries
+  again. `MAX_LOAD_ATTEMPTS` (3) caps that: a permanently broken `getprop` is tried three times in
+  the process lifetime and then settles on reflection, so the retry cannot turn every property read
+  into a 2 s stall — the worst case added is two more deadlines, and only while the dump is broken.
+  A successful dump is still parsed exactly once.
+  *Tests:* `SystemPropertyReaderRetryTest`, 5 cases — a throwing loader is retried, an empty dump is
+  retried, a permanently broken loader is tried exactly `MAX_LOAD_ATTEMPTS` times over ten reads,
+  a successful dump is still parsed once over ten reads, and the recovered dump is cached. The
+  existing `SystemPropertyReaderTest` (including `aFailingDumpDoesNotThrow`) and
+  `SystemPropertyReaderDeadlineTest` are unchanged and still pass.
+  *Verification:* `assembleDebug` green; debug APK **9,827,992 bytes, byte-for-byte the same size as
+  the pre-change baseline** (9,827,992), so nothing was added to the APK. All **433** unit tests
+  pass (428 before, 5 new). No file under `ui/` or `res/` was touched and `ScreenshotTest` renders
+  every published screen unchanged.
+  *Not verified:* the full suite cannot be run as one `testDebugUnitTest` invocation here — the task
+  is not resumable and the 300 s call limit kills it part-way — so it was run as eight `--tests`
+  subsets covering all 57 test classes, every one green. No device was available, so the retry is
+  not exercised against a real wedged `getprop`; the injected-loader tests are the evidence.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
