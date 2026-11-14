@@ -499,6 +499,10 @@ build and tests green before committing.
   *Passed over (13 Nov run):* unchanged — `nproc` = 2, `free` = 2,098 MB; this run's cold
   `assembleDebug` needed four 300 s calls, so the non-resumable `minifyReleaseWithR8` still has no
   window here.
+  *Passed over (14 Nov, third pass):* unchanged — still out of reach, and now for a measured reason
+  rather than a guessed one: the earlier attempts put ~265 s of *pure R8* in a 288 s call on a host
+  that is faster than this one, so even with this run's build fix (see the OO section, which makes a
+  cold `:app:compileDebugKotlin` fit inside one call) `minifyReleaseWithR8` has no window here.
 
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
@@ -558,6 +562,11 @@ build and tests green before committing.
   *Passed over (13 Nov run):* unchanged — same 2 cores / 2,098 MB, so a single non-resumable
   `lintAnalyzeDebug` still cannot be finished inside a 300 s call, and a half-finished analysis still
   cannot be triaged honestly.
+  *Passed over (14 Nov, third pass):* not attempted again. The build fix recorded in the OO section
+  (`-XX:TieredStopAtLevel=1`) makes a one-shot JVM task much cheaper, but `lintAnalyzeDebug` is a
+  multi-minute analysis on the same two cores, and this run spent its build budget proving that
+  `assembleDebug` and the suite can run here at all. Worth retrying first on the next run, now that
+  a cold Kotlin compile no longer eats the whole call.
 
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
@@ -2892,6 +2901,64 @@ be silent" lens produced one finding, which is implemented here.
   class; no size claim is made beyond that measurement.
   *Not verified:* no device is available, so "a dead package service no longer loses the scan" is
   shown against an injected query, not against a real wedged `system_server`.
+
+## OO. Audit findings — 14 November run (third pass)
+
+The first unchecked items were taken in file order and each was skipped for the reason it already
+records, not re-litigated: **F1** (R8) and **F3**/**I8** (lint) are sandbox-bound (2 cores /
+2,098 MB, and neither task can finish inside one call or resume across calls — the F1 entry above now
+records why this run's build fix does not change that); **G1** and **I10** duplicate measurements
+already recorded next to their items; **H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** would change what
+the user reads on screen or in the exported report; **L2, P2, V2, MM2, MM3** move a reported value or
+verdict and need sign-off. Nothing was ticked that was not done.
+
+**This run's real cost was the build itself, and it is worth recording.** On this pod a cold
+`:app:compileDebugKotlin` did not finish inside a 300 s call at all — eleven consecutive attempts were
+killed with the task still running and no class file on disk (the JVM was also starting cold every
+time, because `org.gradle.daemon=false` makes each invocation a single-use daemon). Two changes to the
+*environment only* — nothing in the tree — turned that around:
+
+  * `-XX:TieredStopAtLevel=1 -XX:+UseSerialGC` on the Gradle JVM. A one-shot compile spends most of
+    its life in the interpreter and in C2 warm-up it never gets back, and on this host that was the
+    difference between "never finishes" and `:app:compileDebugKotlin` green in under 285 s, followed by
+    `assembleDebug` in 2m10s and the whole unit suite in ~4m.
+  * Dependency resolution. Maven Central answers with a redirect to `gcp.mirrors.maven.org`, which the
+    sandbox proxy refuses (502 through the CONNECT tunnel), so `org.robolectric:nativeruntime-dist-compat:1.0.16`
+    could not be fetched at all; it was staged in a local file repository through
+    `maven-central.storage-download.googleapis.com` (an allowlisted host) and injected with an init
+    script, not with a change to `settings.gradle.kts`. Robolectric then failed 168 of 444 tests with
+    "Failed to fetch maven artifact …android-all-instrumented…" because it downloads its runtime jars
+    at *test* time; the repo's own `ROBOLECTRIC_DEPENDENCY_DIR` hook (already in
+    `app/build.gradle.kts`) with the five `android-all-instrumented` jars for SDK 29, 30, 33, 34 and 35
+    makes the suite run offline. The suite is green here for the first time this campaign.
+
+Re-reading the code for the "races and error paths that could be silent" lens then produced one
+finding, which is implemented here.
+
+- [x] **OO1. `ScanCoordinator` published its generation across threads with no happens-before edge.**
+  `ScanCoordinator.start` runs on the view model's main-thread scope, but `isCurrent` is asked from a
+  different thread: `AppViewModel.scan` publishes the progress its provider hands back, and
+  `AndroidDeviceInformationProvider.collect` invokes that callback inside `withContext(Dispatchers.IO)`.
+  `generation` was a plain `var`, and neither side is a coroutine suspension point that would order the
+  two, so the reader was free to see the previous number. Both directions of that read are the failure
+  the class exists to prevent: a running scan whose own generation looks superseded drops its progress
+  (the bar stops moving), and a superseded scan whose generation still looks current publishes over the
+  scan that replaced it — the same defect C2 and MM1 fixed on the scan and history paths, left open on
+  the gate between them. *Change:* `generation` and `job` are `@Volatile`, which is the edge, and
+  `start` is `@Synchronized` so two callers cannot interleave into the same number. No file under
+  `res/` or `ui/` was touched; no screen, control, style, layout or copy changed, and nothing the app
+  reports is derived differently — a correct-path scan publishes exactly what it published before.
+  *Tests:* `ScanCoordinatorGenerationTest` (3 cases) drives the gate itself: the number a request is
+  handed is current and the one it replaced is not; the gate answers the same when asked from a worker
+  thread as from the thread that called `start`; and a stale or invented number is never current.
+  *Verification:* `assembleDebug` green; `testDebugUnitTest` green — **447 tests, 444 before plus the
+  three new ones**, 61 classes, none skipped. No size claim: two debug builds of this tree on this host
+  measured 9,844,376 and 9,918,391 bytes, so the packaging is not byte-reproducible here and a delta
+  from a three-line change would be noise.
+  *Not verified:* no device is available, and a memory-visibility bug cannot be provoked on demand on
+  x86 — the tests pin the contract the `@Volatile` fields exist to keep, not the race itself.
+
+---
 
 ## When the list runs out
 

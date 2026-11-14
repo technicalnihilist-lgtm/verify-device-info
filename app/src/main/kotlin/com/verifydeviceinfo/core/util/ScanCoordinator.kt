@@ -19,16 +19,30 @@ import kotlinx.coroutines.launch
  * caller gates its state writes and side effects on [isCurrent] — anything a superseded scan tries
  * to publish is dropped instead of overwriting the progress or the result of the scan that
  * replaced it.
+ *
+ * [start] and [isCurrent] do not run on the same thread, and neither is a coroutine suspension
+ * point, so nothing else in this class orders the two. [start] is called from the view model's
+ * main-thread scope, while the scan asks [isCurrent] from wherever it happens to be: the progress
+ * callback is delivered inside `AndroidDeviceInformationProvider.collect`'s
+ * `withContext(Dispatchers.IO)`, so a running scan checks its generation on an IO worker. Without a
+ * happens-before edge that read may see the *previous* generation — which both drops the progress
+ * of the scan that is running (its own number looks superseded) and, on the other side, lets a
+ * superseded scan publish over its replacement. Both fields are therefore `@Volatile`, which is the
+ * edge, and [start] is synchronized so two callers cannot interleave into the same number.
  */
 class ScanCoordinator(private val scope: CoroutineScope) {
 
+    @Volatile
     private var generation = 0L
+
+    @Volatile
     private var job: Job? = null
 
     /**
      * Cancels whatever is running and starts [block] with a new generation number, which the block
      * must pass to [isCurrent] before it publishes anything or touches storage.
      */
+    @Synchronized
     fun start(block: suspend (Long) -> Unit) {
         val next = generation + 1
         generation = next
