@@ -315,6 +315,15 @@ class AndroidHardwareDiagnosticsEngine(
  *
  * Top-level and `internal` only so the failure path can be driven by a plain JVM test — no `Context`
  * is involved. Cancellation still propagates: a superseded run must unwind, not report a refusal.
+ *
+ * A [LinkageError] is contained the same way an `Exception` is, and for the same reason: the checks
+ * read vendor framework members — `PowerManager.currentThermalStatus`, `CameraManager.cameraIdList`,
+ * `BatteryManager` extras, `SensorManager.registerListener` — and a member the running platform does
+ * not carry raises `NoSuchMethodError`, `NoSuchFieldError` or `NoClassDefFoundError`, which are
+ * `Error`s. `catch (e: Exception)` let those past, out of [runAutomatedChecks], past
+ * `AppViewModel.runAutomatedDiagnostics`'s own `catch (e: Exception)` and into the process: one
+ * unreadable vendor member crashed the app instead of costing one check. [VirtualMachineError] is
+ * still not contained — see `StageTimer.run` for the same boundary on the scan path.
  */
 internal suspend fun automatedCheck(
     testId: String,
@@ -325,6 +334,11 @@ internal suspend fun automatedCheck(
     block()
 } catch (e: CancellationException) {
     throw e
+} catch (e: LinkageError) {
+    DiagnosticResult(
+        testId, title, DiagnosticStatus.UNVERIFIED,
+        note = "Could not read $unreadable: ${e.message}"
+    )
 } catch (e: Exception) {
     DiagnosticResult(
         testId, title, DiagnosticStatus.UNVERIFIED,

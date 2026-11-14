@@ -585,7 +585,7 @@ build and tests green before committing.
 
 ## G. Documentation of the work
 
-- [ ] **G1. Add `docs/PERFORMANCE.md`** recording each measured improvement (before/after numbers) as
+- [x] **G1. Add `docs/PERFORMANCE.md`** recording each measured improvement (before/after numbers) as
   items land. Numbers, not adjectives.
   *Deferred (5 Nov, second run):* every before/after number the A–E items produced is already written
   into this file next to the item, so a second copy today would only duplicate them and drift. Write it
@@ -616,6 +616,11 @@ build and tests green before committing.
   the duplication argument still holds.
   *Passed over (11 Nov run):* this run produced no measurement (the change below is an error path, not a
   timing), so there is still no number without a home in this file.
+  *Done (14 Nov, fourth pass):* the file exists — it was added on 6 November and carries the
+  artefact-level baseline row (9,811,608 bytes, 102,504 methods, 14,071 classes, 12 dex files) plus
+  the two hardware-independent per-item numbers (H4, H12) and the note that every other item's
+  before/after lives next to that item in this file. `tools/measure.sh` appends a row per run. The
+  checkbox was simply never ticked; nothing was written today, and no new number is claimed.
 
 - [x] **G2. Keep `docs/LIMITATIONS.md` current** if any fix changes what the app can or cannot claim.
   *Checked, no change needed:* H1 below only widens where an already-published value is read from; it
@@ -2959,6 +2964,81 @@ finding, which is implemented here.
   x86 — the tests pin the contract the `@Volatile` fields exist to keep, not the race itself.
 
 ---
+
+## PP. Audit findings — 14 November run (fourth pass)
+
+The unchecked items were taken in file order and each was skipped for the reason it already records,
+not re-litigated: **F1** (R8) and **F3**/**I8** (lint) are sandbox-bound — `nproc` = 2 and
+`free` = 2,098 MB again this run, and neither `minifyReleaseWithR8` nor `lintAnalyzeDebug` finishes
+inside one 300 s call or resumes across calls; **G1** is done (ticked above — the file has existed
+since 6 November) and **I10** duplicates F5's recorded dependency audit; **H2, H5, H7, H9, H11, H13,
+H14, M2, M3, M4** would change what the user reads on screen or in the exported report; **L2, P2,
+V2, MM2, MM3** move a reported value or verdict and need sign-off. Nothing was ticked that was not
+done.
+
+Re-reading the collection path for the "error paths that could be silent" lens produced one finding,
+which is implemented here.
+
+- [x] **PP1. Both containment boundaries catch `Exception`, so a missing framework member still kills
+  the app.** `StageTimer.run` is the scan's boundary — its own contract says it "never throws for a
+  stage failure or a timeout" — and `automatedCheck` is the diagnostics pass's boundary — "a check
+  that throws costs that check only". Both were written as `catch (e: Exception)`. Every stage and
+  every automated check reads a vendor framework: `Build.SOC_MANUFACTURER`,
+  `PowerManager.currentThermalStatus`, `CameraManager.cameraIdList`, a `CameraCharacteristics` key,
+  `SensorManager.registerListener`. A member the running build does not carry does not throw an
+  exception — it raises `NoSuchFieldError`, `NoSuchMethodError`, `NoClassDefFoundError` or
+  `ExceptionInInitializerError`, and those are `LinkageError`s, i.e. `Error`s, which
+  `catch (e: Exception)` does not see. The error then left `run`/`automatedCheck`, left
+  `AndroidDeviceInformationProvider.collect` / `runAutomatedChecks`, missed `AppViewModel.scan`'s and
+  `runAutomatedDiagnostics`'s own `catch (e: Exception)`, and reached the process: one unreadable
+  vendor member cost the whole app instead of one stage or one check. This is not hypothetical for
+  this codebase — `IdentityCollector` carries the note that exactly this (`Build.SOC_MANUFACTURER` on
+  Android 8-11) used to crash every scan, and that fix was made at the read site only, leaving both
+  boundaries behind it unguarded.
+  *Change:* both boundaries now also catch `LinkageError`, returning the same
+  `StageOutcome.Failed(error)` / `UNVERIFIED` row they already returned for an `Exception`, with the
+  same message text (`"<stage> failed: <message>"`, `"Could not read <thing>: <message>"`) and the
+  same fallbacks downstream. The boundary is `LinkageError` and not `Error`: `VirtualMachineError`
+  (`OutOfMemoryError`, `StackOverflowError`) still propagates, because a process that is out of
+  memory or out of stack is not a stage to skip and a report to keep, and turning it into a partial
+  scan would be worse than the crash. No file under `res/` or `ui/` was touched and nothing the app
+  reports is derived differently: a stage that hit this before produced no report at all.
+  *Tests:* `FrameworkMemberContainmentTest` (5 cases, plain JVM, no Robolectric): a stage that hits a
+  missing field is `Failed` with that field's name and **the stages after it still run**; a stage that
+  hits a missing class is `Failed` with the class name; a stage that throws `OutOfMemoryError` still
+  reaches the caller; an automated check that hits a missing method comes back `UNVERIFIED` with the
+  exact note text; and a check that throws `OutOfMemoryError` still reaches the caller. The
+  supervisor scope the tests build is the one `AndroidDeviceInformationProvider` uses — with a plain
+  `Job` a failing child cancels the scope, which is what the first draft of the test caught.
+  *Verification:* `assembleDebug` green. `testDebugUnitTest` green — **452 tests in 62 classes** (447
+  and 61 before, plus the 5 new ones), none skipped, run in eight `--tests` batches because one
+  full-suite invocation does not fit in this sandbox's 300 s command limit. `tools/measure.sh
+  --print`: 9,844,376 bytes, 102,713 methods, 14,112 classes — no size claim is made from it, since
+  two debug builds of this tree on this host have already differed by tens of kilobytes.
+  *Not verified:* no device is available, so "a missing framework member no longer kills the scan" is
+  shown against a thrown `NoSuchFieldError`, not against a handset that genuinely lacks the member.
+  `tools/check-no-ui-change.sh` could not run here — this checkout is not a git repository (exit 2,
+  "not a git checkout"), so "the UI did not change" was checked by path instead: the only non-test
+  files touched are `core/util/StageTimer.kt`, `data/android/AndroidHardwareDiagnosticsEngine.kt` and
+  this document, none of them under `ui/` or `res/`.
+  *Environment (no build file changed):* this host needed the OO run's `-XX:TieredStopAtLevel=1
+  -XX:+UseSerialGC` Gradle JVM flags, a local file repository for
+  `org.robolectric:nativeruntime-dist-compat:1.0.16` (Maven Central still redirects to a host the
+  sandbox proxy refuses) and `ROBOLECTRIC_DEPENDENCY_DIR` with the `android-all-instrumented` jars for
+  SDK 29, 30, 33, 34 and 35.
+
+- [ ] **PP2. `AppViewModel.scan` and `runAutomatedDiagnostics` still catch `Exception` only.** PP1
+  closes the two boundaries a framework read is reached through, but both view-model catches are the
+  last line before the process: anything that raises a `LinkageError` outside a stage — the
+  `Build.*` reads in `AndroidDeviceInformationProvider.fallbackIdentity`, a collector constructed
+  before its stage starts — still leaves the coroutine and crashes the app rather than reporting
+  `"Scan failed: …"` the way every other failure on that path does. *Change:* add a `LinkageError`
+  branch beside each existing `catch (e: Exception)`, reusing the same message text and the same
+  `error` state field. *Verify:* a unit test that drives `AppViewModel` with a provider whose
+  `collect` throws `NoClassDefFoundError` and asserts `state.error` starts with `"Scan failed: "` and
+  that no exception escapes — which needs `AppContainer`'s provider to be injectable, the one piece
+  of wiring this item has to add. Not implemented this pass: the injection seam is a constructor
+  change on a class the UI reads state from, and it belongs in a run that can give it its own tests.
 
 ## When the list runs out
 

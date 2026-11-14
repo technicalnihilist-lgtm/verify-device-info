@@ -59,6 +59,23 @@ class StageTimer(
     /**
      * Runs [block] and reports what happened. Never throws for a stage failure or a timeout; only
      * cancellation of the calling coroutine propagates, so a superseded scan still unwinds.
+     *
+     * "A stage failure" includes a [LinkageError]. Every stage reads a vendor framework —
+     * `Build.SOC_MANUFACTURER`, `PowerManager.currentThermalStatus`, a `CameraCharacteristics` key,
+     * a `SensorManager` method — and a member that the running platform does not carry raises
+     * `NoSuchFieldError`, `NoSuchMethodError`, `NoClassDefFoundError` or
+     * `ExceptionInInitializerError`, all of which are `Error`s and not `Exception`s. This app has
+     * already been crashed by exactly that once (`IdentityCollector` reads `Build.SOC_MANUFACTURER`
+     * behind a level check for that reason), and `catch (e: Exception)` does not contain any of
+     * them: the error left this method, left `collect`, missed `AppViewModel.scan`'s own
+     * `catch (e: Exception)` and took the process down. A framework read that does not exist on
+     * this build is a stage that failed, not a scan that must crash.
+     *
+     * [LinkageError] is the boundary and it is deliberate: it covers exactly the class of failure a
+     * missing framework member raises. [VirtualMachineError] (`OutOfMemoryError`,
+     * `StackOverflowError`) still propagates — a process that is out of memory or out of stack is
+     * not a stage to skip and a report to keep, and swallowing it would turn a fatal state into a
+     * plausible-looking partial scan.
      */
     suspend fun <T> run(block: suspend () -> T): StageOutcome<T> {
         val budget = nextStageTimeoutMillis()
@@ -81,6 +98,10 @@ class StageTimer(
             // scan as failed. The caller's own job state is what tells the two apart.
             work.cancel()
             if (!currentCoroutineContext().isActive) throw e
+            return StageOutcome.Failed(e)
+        } catch (e: LinkageError) {
+            // A framework member this platform does not carry. See the contract above.
+            work.cancel()
             return StageOutcome.Failed(e)
         } catch (e: Exception) {
             work.cancel()
