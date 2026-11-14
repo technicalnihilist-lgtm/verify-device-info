@@ -3140,6 +3140,53 @@ fails the resolution before the local repo is consulted — plus the five
 the hook `app/build.gradle.kts` already carries. With both, the whole 457-test suite runs offline in
 about four minutes.
 
+## SS. Audit findings — 15 November run
+
+The unchecked items were re-read in file order and each was skipped for the reason its own entry
+already records, not re-litigated: **F1** (R8), **F3** and **I8** (lint) are sandbox-bound — this is
+the same 2 cores / 2,098 MB host, and this run's cold `assembleDebug` again needed four 300 s calls
+before it first went green, so neither the non-resumable `minifyReleaseWithR8` nor
+`lintAnalyzeDebug` has a window here; **G1** and **I10** duplicate measurements already recorded
+next to their items; **H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** would change what the user reads
+on screen or in the exported report; **L2, P2, V2, MM2, MM3** move a reported value or verdict and
+need sign-off. Nothing was ticked that was not done.
+
+The audit then re-read the rendering path — the one part of the app that is not a collector, a
+report or a storage write, and so the part the earlier sections had looked at least — and found one
+thing that costs the user something on every screen-on and changes nothing they can see.
+
+- [x] **SS1. The Dashboard's device illustration ran an infinite animation for as long as the
+  screen was on, with nothing observing it.** `DeviceIllustration` started a
+  `rememberInfiniteTransition` unconditionally and drove the scan sweep from it. An infinite
+  transition is not lazy: it holds a frame-clock callback and writes a new animated value on every
+  frame, for the whole lifetime of the composable that owns it. But `sweep` is read in exactly one
+  place — inside the `Canvas` draw lambda, under `if (scanning)` — so on an idle Dashboard (the
+  screen the app opens on, and the one it sits on whenever nothing is happening) the app asked the
+  frame clock for a frame at the display's rate, and wrote a state nobody read, for as long as the
+  screen was on. It cost no redraw, because a state that is not read registers no observer, which
+  is exactly why it went unnoticed: the wasted work is invisible in a screenshot, in a profile of
+  the draw phase and in every test the project has.
+  *Change:* the transition is created inside the branch that uses it — `val sweep: Float = if
+  (scanning) { rememberInfiniteTransition(…).animateFloat(…) } else 0f` — so an idle illustration
+  requests no frames at all. The drawing is untouched: the same sweep is computed from the same
+  `tween(2200, LinearEasing)` spec and read by the same `drawRect`. The one behavioural nuance is
+  the phase — a scan that starts now begins its sweep at the top of the panel instead of joining a
+  loop that has been running since the screen appeared — which is a timing detail of a 2.2 s
+  looping gradient, not a change of layout, spacing, colour, style or copy. No file under `res/`
+  was touched, no screen or control was added, and no user-visible string changed.
+  *Verification:* `assembleDebug` green; `testDebugUnitTest` green — **457 tests, 64 classes, 0
+  failures, 0 skipped**, the same suite that was green before the change, including the seven
+  `ScreenshotTest` screen renderings of the real composables (the Dashboard among them), so the
+  rendered pixels the project asserts on are unchanged.
+  *Not verified:* no device is available, and no before/after frame count could be measured here —
+  the value the animation wrote had no observer, so Compose's test clock exposes no signal for it
+  (nothing recomposes, nothing redraws, and `waitForIdle` is idle either way). The claim rests on
+  the structure: an `InfiniteTransition` runs for its composable's lifetime, and this one now
+  exists only while a scan is running. No test was added for that reason, rather than adding one
+  that would pass with or without the fix.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

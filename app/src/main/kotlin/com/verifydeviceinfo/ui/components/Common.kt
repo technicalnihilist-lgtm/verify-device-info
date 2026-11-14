@@ -291,6 +291,20 @@ fun MockDataBanner(modifier: Modifier = Modifier) {
 /**
  * Abstract device illustration drawn with Canvas — no vendor artwork is copied, so nothing here
  * implies a specific manufacturer's product photography.
+ *
+ * The sweep animation exists only to move the scan line, so it is started only while [scanning]
+ * is true. An [rememberInfiniteTransition] runs for the whole lifetime of the composable that
+ * owns it — it asks the frame clock for a frame and writes a new animated value on every frame,
+ * for ever — and this illustration is on the Dashboard, which is the screen the app opens on and
+ * the one it sits on when nothing is happening. Started unconditionally, it therefore kept a
+ * frame callback and a state write per frame alive for as long as the screen was on, with nothing
+ * observing the value: `sweep` is read inside the `Canvas` draw lambda and only under
+ * `if (scanning)`, so an idle Dashboard requested frames at the display's rate to produce a value
+ * no draw and no composition ever read. The transition is now created in the branch that uses it,
+ * so an idle illustration requests no frames at all, and a scan gets a sweep that starts at the
+ * top of the panel instead of joining the loop at whatever phase it had reached. The drawing
+ * itself is unchanged: the same sweep is computed from the same spec over the same 2.2 s, and
+ * nothing but that sweep reads the value.
  */
 @Composable
 fun DeviceIllustration(
@@ -298,16 +312,21 @@ fun DeviceIllustration(
     scanning: Boolean = false,
     accent: Color = DiagnosticColors.Accent
 ) {
-    val transition = rememberInfiniteTransition(label = "scan")
-    val sweep by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "sweep"
-    )
+    val sweep: Float = if (scanning) {
+        val transition = rememberInfiniteTransition(label = "scan")
+        val animatedSweep by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(2200, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "sweep"
+        )
+        animatedSweep
+    } else {
+        0f
+    }
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
