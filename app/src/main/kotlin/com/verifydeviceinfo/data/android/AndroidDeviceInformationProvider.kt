@@ -41,7 +41,17 @@ class AndroidDeviceInformationProvider(
      * wiring — the promise that a scan whose stages never answer still finishes with a snapshot —
      * without a device that hangs; production always takes the default.
      */
-    private val timerFactory: (CoroutineScope) -> StageTimer = { StageTimer(it) }
+    private val timerFactory: (CoroutineScope) -> StageTimer = { StageTimer(it) },
+    /**
+     * The StrongBox feature query, as a parameter only so a test can make it throw or block without
+     * a device whose package manager does; production always asks the platform. See the call site
+     * for why it runs under the same deadline as the collector stages.
+     */
+    private val strongBoxFeature: () -> Boolean = {
+        context.packageManager.hasSystemFeature(
+            android.content.pm.PackageManager.FEATURE_STRONGBOX_KEYSTORE
+        )
+    }
 ) : DeviceInformationProvider {
 
     override val platform: Platform = Platform.ANDROID
@@ -133,6 +143,17 @@ class AndroidDeviceInformationProvider(
             softwarePair?.let { fields += it.second }
             stage("Security and installed software")
 
+            // The one framework query in this method that is not a collector stage. `PackageManager`
+            // is a Binder call into the system service, so it can block like any other — and on a
+            // device whose package service has died it throws instead, which used to unwind the
+            // whole scan: every field the nine stages above had already collected was thrown away
+            // and the user was told "Scan failed" because one feature flag could not be read. Run
+            // it as a stage, like the collectors, so it gets the same deadline and a failure costs
+            // one `collectionErrors` line rather than the entire report.
+            val strongBoxAvailable = collectStage(timer, errors, "StrongBox feature check") {
+                strongBoxFeature()
+            } ?: false
+
             val hardware = HardwareFacts(
                 socManufacturer = identityResult?.identity?.socManufacturer,
                 socModel = identityResult?.identity?.socModel,
@@ -155,9 +176,7 @@ class AndroidDeviceInformationProvider(
                 sensors = sensorPair?.first.orEmpty(),
                 biometricStrongAvailable = securityResult?.biometricStrongAvailable ?: false,
                 biometricAnyAvailable = securityResult?.biometricAnyAvailable ?: false,
-                strongBoxAvailable = context.packageManager.hasSystemFeature(
-                    android.content.pm.PackageManager.FEATURE_STRONGBOX_KEYSTORE
-                ),
+                strongBoxAvailable = strongBoxAvailable,
                 secureLockScreen = securityResult?.secureLockScreen ?: false,
                 vibratorAvailable = audio?.vibratorAvailable ?: false,
                 speakerAvailable = audio?.speakerAvailable ?: false,

@@ -46,8 +46,10 @@ class ScanTimeoutWiringTest {
         assertNotNull(snapshot)
         assertFalse("a fallback snapshot is not mock data", snapshot.isMock)
         // Every collection stage is accounted for rather than silently missing: nine of them,
-        // with connectivity/audio and security/software each sharing one progress step.
-        assertEquals(9, snapshot.collectionErrors.size)
+        // with connectivity/audio and security/software each sharing one progress step, plus the
+        // StrongBox feature query, which is the one framework call in `collect` outside a collector
+        // and runs under the same deadline.
+        assertEquals(10, snapshot.collectionErrors.size)
         snapshot.collectionErrors.forEach { error ->
             assertTrue("unexpected stage report: $error", error.contains("timed out"))
         }

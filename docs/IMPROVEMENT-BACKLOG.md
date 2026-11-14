@@ -2844,6 +2844,55 @@ below and left open, because each changes a value the user reads.
   sign-off:* it moves the Performance score and the input list the user reads on a device whose
   hardware stage failed.
 
+## NN. Audit findings — 14 November run (second pass)
+
+The first unchecked items were taken in file order and each was skipped for the reason it already
+records, not re-litigated: **F1** (R8), **F3**/**I8** (lint) are sandbox-bound — this host has
+`nproc` = 2 and 2,098 MB, this run's cold `assembleDebug` needed seven 300 s calls, and neither
+`minifyReleaseWithR8` nor `lintAnalyzeDebug` finishes inside one call or resumes across calls;
+**G1** and **I10** duplicate measurements already recorded next to their items; **H2, H5, H7, H9,
+H11, H13, H14, M2, M3, M4** would change what the user reads on screen or in the exported report;
+**L2, P2, V2** move a reported verdict and need sign-off. **MM2** (the double-counted duration) and
+**MM3** (an unread CPU core count scoring 60) were re-read first and both stay open on the same
+ground: each changes a number the app renders — every duration on the Age screen, the PDF and the
+JSON export for MM2, the Performance score and its input list for MM3 — which is a reported-value
+change of the class waiting on sign-off, not a drive-by edit under this freeze. Nothing was ticked
+that was not done.
+
+Re-reading the collection path for the "Binder calls that could be cached / error paths that could
+be silent" lens produced one finding, which is implemented here.
+
+- [x] **NN1. The StrongBox feature query was the one Binder call in a scan outside a stage deadline.**
+  `AndroidDeviceInformationProvider.collect` runs all nine collector stages under a `StageTimer`, so
+  a stage that never answers is abandoned and recorded in `collectionErrors` — that is the promise
+  the class documents and `ScanTimeoutWiringTest` checks. The `HardwareFacts` assembly then called
+  `context.packageManager.hasSystemFeature(FEATURE_STRONGBOX_KEYSTORE)` directly, inside no stage.
+  `PackageManager` is a Binder call into the system service: it blocks like the camera or sensor
+  service blocks, and on a device whose package service has died it throws. Either way the failure
+  escaped `collect`, `AppViewModel.scan` caught it as `"Scan failed: …"`, and every field the nine
+  stages had already collected was thrown away — a whole report lost because one feature flag could
+  not be read. This is the same shape as the failure `automatedCheck` was written to stop on the
+  diagnostics side (an unreadable vendor service discarding results that had already been measured).
+  *Change:* the query is taken through `collectStage` like a collector, so it inherits the stage
+  deadline and the whole-scan budget, and a failure or timeout costs one `collectionErrors` line and
+  the flag (`strongBoxAvailable = false`) instead of the snapshot. The query is a constructor
+  parameter, the way `timerFactory` already is, so both paths are reachable from a JVM test; the
+  default is the platform call, unchanged. No file under `res/` or `ui/` was touched, and no screen,
+  control, style, layout or copy changed.
+  *Tests:* `StrongBoxFeatureStageTest` (2 cases) drives the real provider: a query that throws still
+  produces a snapshot, reports the flag as absent and records exactly one `StrongBox feature check
+  failed: …` line carrying the cause; a query that answers still reaches `hardware.strongBoxAvailable`
+  and records nothing. `ScanTimeoutWiringTest` moves from nine accounted-for stages to ten, which is
+  the wiring this item adds.
+  *Verification:* `assembleDebug` green. All 60 test classes pass — **444 tests, 442 before plus the
+  two new ones** — run in eight `--tests` invocations because one full-suite invocation does not
+  finish inside this sandbox's 300 s command limit (the suite needs about 12–15 minutes of CPU on two
+  cores); every class ran, none was skipped. The debug APK is 9,901,999 bytes, 102,712 methods,
+  14,112 classes (`tools/measure.sh --print`). The change adds one lambda and one call to an existing
+  class; no size claim is made beyond that measurement.
+  *Not verified:* no device is available, so "a dead package service no longer loses the scan" is
+  shown against an injected query, not against a real wedged `system_server`.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
