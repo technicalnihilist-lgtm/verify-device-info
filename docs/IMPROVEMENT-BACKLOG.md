@@ -3078,7 +3078,7 @@ here.
 The new item below was found while writing PP2's second test, and is recorded rather than fixed: it
 is a separate defect on a separate path, and this run's item is PP2.
 
-- [ ] **QQ1. `AppViewModel.refreshHistory` writes back a state it read before it suspended, so it can
+- [x] **QQ1. `AppViewModel.refreshHistory` writes back a state it read before it suspended, so it can
   erase an error published meanwhile.** `refreshHistory` is `_state.value = _state.value.copy(history =
   container.history.list())` inside `viewModelScope.launch`. The receiver of `copy` is evaluated
   *before* the argument, and `history.list()` is a suspend call that reads the disk, so any state
@@ -3097,6 +3097,48 @@ is a separate defect on a separate path, and this run's item is PP2.
   to take a history override, the same optional-parameter seam PP2 added for the provider and the
   diagnostics engine. No visible change: the history list still renders the same entries, and the only
   difference is that a message published during a refresh is no longer dropped.
+  *Done (14 Nov, sixth pass):* `refreshHistory` now reads the list into a local and publishes it
+  with `_state.update { it.copy(history = history) }`, whose CAS loop re-reads the state it writes
+  back, instead of `_state.value = _state.value.copy(history = container.history.list())`, which
+  took the copy of the state before `list()` suspended and wrote that stale copy over whatever had
+  been published meanwhile. `AppContainer` takes the `historyOverride` seam the entry asked for
+  (third optional constructor parameter, same shape as the provider and diagnostics overrides;
+  production construction is unchanged and still builds `FileDiagnosticHistory`). Two tests in
+  `AppViewModelHistoryRefreshTest`: one parks the refresh on a `CompletableDeferred` gate inside
+  `list()`, publishes a scan failure, releases the gate and asserts the error survives and the
+  entries are listed; the other asserts a plain refresh still publishes the stored list and calls
+  `list()` once. *The first test was checked against the pre-fix body:* with the old line restored
+  it fails (`2 tests completed, 1 failed`), with the fix it passes — so it pins the defect rather
+  than the fix. No file under `res/` was touched; the only `ui/` file changed is `AppViewModel.kt`,
+  already in `NON_RENDERING_UI_FILES`, and `tools/check-no-ui-change.sh` reports
+  `OK — nothing under ui/ or res/ differs from HEAD (31 files tracked there)`. `assembleDebug` green,
+  debug APK 9,844,376 bytes; `testDebugUnitTest` green — **457 tests, 455 before plus the two new
+  ones**, 64 classes, none skipped. No size claim: the debug APK is not byte-reproducible on this
+  host and no pre-change baseline was rebuilt this run.
+
+## RR. Audit findings — 14 November run (sixth pass)
+
+The unchecked items were taken in file order and each was skipped for the reason it already records,
+not re-litigated: **F1** (R8) and **F3**/**I8** (lint) are sandbox-bound — `nproc` = 2 and
+`free` = 2,098 MB, and neither `minifyReleaseWithR8` nor `lintAnalyzeDebug` finishes inside one
+300 s call or resumes across calls; **I10** duplicates F5's recorded dependency audit; **H2, H5, H7,
+H9, H11, H13, H14, M2, M3, M4** would change what the user reads on screen or in the exported report;
+**L2, P2, V2, MM2, MM3** move a reported value or verdict and need sign-off. That left QQ1, the last
+item on the list that is neither blocked, a duplicate, nor gated on sign-off, and it is implemented
+here — see the entry above for the change, the two tests and the before/after check.
+
+**Build environment, for the next run.** Two things cost this pass the most time and are both
+environment-only, with nothing in the tree changed for them: `-XX:TieredStopAtLevel=1
+-XX:+UseSerialGC` on the Gradle JVM (the same lever the OO section records) took a cold
+`:app:compileDebugKotlin` from "never finishes inside a call" to green in one 270 s slice, after
+which `assembleDebug` completed in 1m11s; and the unit-test classpath needed
+`org.robolectric:nativeruntime-dist-compat:1.0.16` staged from
+`maven-central.storage-download.googleapis.com` into a local file repository injected with an init
+script — *added first*, before `google()`/`mavenCentral()`, or Maven Central's 502 through the proxy
+fails the resolution before the local repo is consulted — plus the five
+`android-all-instrumented` jars (SDK 29, 30, 33, 34, 35) in `ROBOLECTRIC_DEPENDENCY_DIR`, which is
+the hook `app/build.gradle.kts` already carries. With both, the whole 457-test suite runs offline in
+about four minutes.
 
 ## When the list runs out
 

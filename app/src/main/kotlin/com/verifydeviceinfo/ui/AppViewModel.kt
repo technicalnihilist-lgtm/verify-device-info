@@ -237,9 +237,22 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Re-reads the stored history and publishes it.
+     *
+     * The list is read into a local and merged with `update`, whose CAS loop re-reads the state it
+     * writes back. Writing `_state.value = _state.value.copy(history = …)` instead evaluated the
+     * receiver *before* the argument, so the copy was taken before `LocalDiagnosticHistory.list`
+     * suspended on the disk read; anything published while that read was in flight — a failed
+     * scan's "Scan failed: …", an export message, a diagnostic result — was overwritten by the
+     * pre-suspension copy when the refresh resumed. The constructor queues one refresh, so this was
+     * reachable from a cold start. The rendered list is the same either way; only a message
+     * published during the read stops being dropped.
+     */
     fun refreshHistory() {
         viewModelScope.launch {
-            _state.value = _state.value.copy(history = container.history.list())
+            val history = container.history.list()
+            _state.update { it.copy(history = history) }
         }
     }
 

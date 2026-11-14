@@ -38,7 +38,8 @@ import com.verifydeviceinfo.domain.analysis.DefaultScoreEngine
 class AppContainer(
     private val application: Application,
     deviceInformationProviderOverride: DeviceInformationProvider? = null,
-    diagnosticsEngineOverride: HardwareDiagnosticsEngine? = null
+    diagnosticsEngineOverride: HardwareDiagnosticsEngine? = null,
+    historyOverride: LocalDiagnosticHistory? = null
 ) {
 
     private val preferences =
@@ -64,7 +65,7 @@ class AppContainer(
     val integrityAnalyzer: SystemIntegrityAnalyzer = DefaultIntegrityAnalyzer()
     val scoreEngine: EvidenceAndConfidenceEngine = DefaultScoreEngine()
     val reportGenerator: ReportGenerator = PdfReportGenerator(application)
-    val history: LocalDiagnosticHistory = FileDiagnosticHistory(application)
+    val history: LocalDiagnosticHistory = historyOverride ?: FileDiagnosticHistory(application)
 
     /** Only reachable in debug builds, and always labelled as mock data in the UI. */
     val mockProvider: DeviceInformationProvider? =
