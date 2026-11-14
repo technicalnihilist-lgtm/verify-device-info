@@ -3027,7 +3027,7 @@ which is implemented here.
   sandbox proxy refuses) and `ROBOLECTRIC_DEPENDENCY_DIR` with the `android-all-instrumented` jars for
   SDK 29, 30, 33, 34 and 35.
 
-- [ ] **PP2. `AppViewModel.scan` and `runAutomatedDiagnostics` still catch `Exception` only.** PP1
+- [x] **PP2. `AppViewModel.scan` and `runAutomatedDiagnostics` still catch `Exception` only.** PP1
   closes the two boundaries a framework read is reached through, but both view-model catches are the
   last line before the process: anything that raises a `LinkageError` outside a stage — the
   `Build.*` reads in `AndroidDeviceInformationProvider.fallbackIdentity`, a collector constructed
@@ -3039,6 +3039,64 @@ which is implemented here.
   that no exception escapes — which needs `AppContainer`'s provider to be injectable, the one piece
   of wiring this item has to add. Not implemented this pass: the injection seam is a constructor
   change on a class the UI reads state from, and it belongs in a run that can give it its own tests.
+  *Done (14 Nov, fifth pass):* both catches now have a `LinkageError` branch beside the existing
+  `catch (e: Exception)`, publishing the identical text into the identical field —
+  `"Scan failed: ${e.message ?: e.javaClass.simpleName}"` and `"Diagnostics failed: ${e.message}"` —
+  so a linkage failure reads as a failed scan or a failed diagnostics run instead of leaving the
+  coroutine. The seam the test needs is `AppContainer`'s two optional `…Override` parameters
+  (`deviceInformationProviderOverride`, `diagnosticsEngineOverride`); production passes neither and
+  gets exactly the previous wiring, so the graph is unchanged at runtime. `AppViewModel` takes its
+  container as a constructor parameter with a default and `@JvmOverloads`, which keeps the
+  `(Application)` constructor the framework's `AndroidViewModelFactory` reflects on and changes
+  nothing a screen reads. *Tests:* `ScanFailureBoundaryTest` (3 cases, Robolectric, SDK 34): a scan
+  whose provider throws `NoClassDefFoundError` ends with `error = "Scan failed: android/os/ServiceManager"`
+  and `scanning = false`; a diagnostics run whose engine throws it ends with
+  `"Diagnostics failed: android/os/ServiceManager"`; and an ordinary `IllegalStateException` still
+  reports `"Scan failed: boom"`, so the new branch did not swallow the old one.
+  *Verification:* `assembleDebug` green (`app-debug.apk` 9,844,376 bytes, the same size the OO run
+  measured — no size claim, since this host is not byte-reproducible); `testDebugUnitTest` green —
+  **455 tests in 63 classes** (452 and 62 before, plus the 3 new ones), none skipped;
+  `tools/check-no-ui-change.sh HEAD` clean (31 files tracked under `ui/` and `res/`, none differs).
+  No screen, control, style, layout, copy or reported value changes: the only production files
+  touched are `AppContainer.kt` and `ui/AppViewModel.kt`, and the second one draws nothing.
+  *Not verified:* no device is available, so this is shown against a thrown `NoClassDefFoundError`,
+  not against a handset whose framework genuinely lacks the member. The diagnostics case also needed
+  a settle step before it could be asserted — see QQ1 for why, which is a pre-existing defect the
+  test walked into rather than a defect in this change.
+
+## QQ. Audit findings — 14 November run (fifth pass)
+
+The unchecked items were taken in file order and each was skipped for the reason it already records,
+not re-litigated: **F1** (R8) and **F3**/**I8** (lint) are sandbox-bound — `nproc` = 2 and
+`free` = 2,098 MB again, and neither `minifyReleaseWithR8` nor `lintAnalyzeDebug` finishes inside one
+300 s call or resumes across calls; **I10** duplicates F5's recorded dependency audit; **H2, H5, H7,
+H9, H11, H13, H14, M2, M3, M4** would change what the user reads on screen or in the exported report;
+**L2, P2, V2, MM2, MM3** move a reported value or verdict and need sign-off. That left PP2, the first
+item on the list that is neither blocked, a duplicate, nor gated on sign-off, and it is implemented
+here.
+
+The new item below was found while writing PP2's second test, and is recorded rather than fixed: it
+is a separate defect on a separate path, and this run's item is PP2.
+
+- [ ] **QQ1. `AppViewModel.refreshHistory` writes back a state it read before it suspended, so it can
+  erase an error published meanwhile.** `refreshHistory` is `_state.value = _state.value.copy(history =
+  container.history.list())` inside `viewModelScope.launch`. The receiver of `copy` is evaluated
+  *before* the argument, and `history.list()` is a suspend call that reads the disk, so any state
+  change published while that read is in flight — a `"Scan failed: …"` error, a `"PDF ready to
+  share."` message, a diagnostic session update — is overwritten by the pre-suspension copy when the
+  refresh resumes. It is reachable on a cold start: the constructor queues one refresh, so a scan that
+  fails fast, or any action the user takes before the first history read lands, can have its result
+  silently discarded. Found because PP2's diagnostics test asserted an error that had been written
+  and then vanished on the full suite (it passed alone, where the stored history is empty and the read
+  returns without suspending) — the test now drains the constructor's refresh first, with a comment
+  pointing here. *Change:* read the list into a local and publish it with `_state.update { it.copy(
+  history = list) }`, which re-reads the current state under the CAS loop instead of writing a copy
+  taken before the suspension; the same shape `publish` already uses. *Verify:* a test that starts a
+  refresh against a `LocalDiagnosticHistory` whose `list` suspends on a latch, publishes an error
+  through `scan`, releases the latch, and asserts the error is still there — which needs `AppContainer`
+  to take a history override, the same optional-parameter seam PP2 added for the provider and the
+  diagnostics engine. No visible change: the history list still renders the same entries, and the only
+  difference is that a message published during a refresh is no longer dropped.
 
 ## When the list runs out
 

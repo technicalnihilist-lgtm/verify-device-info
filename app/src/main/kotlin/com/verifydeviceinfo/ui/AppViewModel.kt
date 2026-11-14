@@ -37,9 +37,15 @@ data class UiState(
     val usedMockData: Boolean = false
 )
 
-class AppViewModel(application: Application) : AndroidViewModel(application) {
-
-    val container = AppContainer(application)
+/**
+ * [container] is a constructor parameter rather than a field built in the body so a test can supply
+ * a graph whose provider or diagnostics engine fails on purpose; `@JvmOverloads` keeps the
+ * `(Application)` constructor the framework's default `AndroidViewModelFactory` reflects on.
+ */
+class AppViewModel @JvmOverloads constructor(
+    application: Application,
+    val container: AppContainer = AppContainer(application)
+) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(
         UiState(purchaseDateMillis = container.purchaseDateMillis, redacted = container.redactByDefault)
@@ -119,6 +125,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: CancellationException) {
                 // Superseded by a newer scan: that is not a failure and must not be reported as one.
                 throw e
+            } catch (e: LinkageError) {
+                // An unresolved class or method is not an Exception, so without this branch it
+                // left the coroutine and took the process with it instead of reporting a failed
+                // scan. Same message, same state field as the branch below.
+                publish(generation) {
+                    it.copy(
+                        scanning = false,
+                        error = "Scan failed: ${e.message ?: e.javaClass.simpleName}"
+                    )
+                }
             } catch (e: Exception) {
                 publish(generation) {
                     it.copy(
@@ -144,6 +160,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 results.forEach { session = session.with(it) }
                 _state.value = _state.value.copy(session = session)
                 rebuildReport()
+            } catch (e: LinkageError) {
+                // Same reasoning as the scan: a linkage failure must read as a failed diagnostics
+                // run, not as a crash.
+                _state.value = _state.value.copy(error = "Diagnostics failed: ${e.message}")
             } catch (e: Exception) {
                 _state.value = _state.value.copy(error = "Diagnostics failed: ${e.message}")
             }
