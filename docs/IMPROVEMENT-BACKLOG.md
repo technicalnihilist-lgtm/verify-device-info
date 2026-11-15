@@ -3235,6 +3235,72 @@ changing: a constant catalogue rebuilt on every read.
 
 ---
 
+## UU. Audit findings — 15 November run (third pass)
+
+The nineteen unchecked items were re-read in file order and each was skipped for the reason its own
+entry already records, not re-litigated: **F1** (R8), **F3** and **I8** (lint) are sandbox-bound —
+`nproc` = 2, `free` = 2,098 MB, the same host as every attempt above, and this run's cold
+`assembleDebug` needed thirteen 300 s calls before it first went green, so neither the
+non-resumable `minifyReleaseWithR8` nor `lintAnalyzeDebug` has a window here; **I10** duplicates the
+classpath audit F5 already recorded; **H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** would change what
+the user reads on screen or in the exported report; **L2, P2, V2, MM2, MM3** move a reported value or
+verdict and need sign-off. Nothing was ticked that was not done.
+
+The audit then re-read the scan itself — the one path every user waits on, and the one the earlier
+sections had only ever looked at stage by stage rather than as a whole — and found that the ten
+collection stages were still being run one after another although none of them needs another's
+output.
+
+- [x] **UU1. The scan ran its ten collection stages one after another, so it cost their sum.**
+  `AndroidDeviceInformationProvider.collect` awaited each stage before starting the next: identity,
+  hardware, battery, cameras, sensors, connectivity, audio, security, software, and then the
+  StrongBox feature query. Every one of them is a blocking read of a different system service —
+  `getprop`, the package manager, the camera and sensor services, the audio service, `Settings`,
+  `StatFs` — so almost all of that time is spent *waiting* for a Binder call to answer rather than
+  computing, and the ten waits added up into the wall-clock time the user sat on "Scanning". Not one
+  stage's output is another's input: each returns its own fields and its own facts, and they are
+  concatenated in declaration order afterwards.
+  *Change:* all ten stages are started together with `async` inside a single `coroutineScope` and
+  then awaited in the same declaration order the code used to run them in, so a scan costs its
+  slowest stage instead of the sum of all ten. The folding is untouched — a stage's fields and its
+  `collectionErrors` line are still appended in the same order — so the snapshot, and every report
+  built from it, is identical. The eight progress steps are emitted with the same labels in the same
+  order, each still only after the work it labels has actually completed, so the scanning animation
+  still cannot outrun the real work. Each stage keeps its own `StageTimer` deadline; what the whole
+  scan can now cost is one stage deadline instead of ten, which is what the 90 s whole-scan ceiling
+  existed to bound. Cancellation still unwinds everything: the stages are children of the scan
+  coroutine, so a superseded scan stops waiting at once. No file under `ui/` or `res/` was touched,
+  and no user-visible string, control, style, spacing or colour changed.
+  *Verification:* `assembleDebug` green, debug APK **9,844,376 bytes** — byte-for-byte the size the
+  14 November run recorded, so nothing was added to the app. `testDebugUnitTest` green — **462
+  tests, 65 classes, 0 failures, 0 errors, 0 skipped**, the same suite that was green before the
+  change, including `ScanTimeoutWiringTest` (all ten stages still report a timeout line, in the same
+  order, when the budget is already spent), `StrongBoxFeatureStageTest` (the real collectors driven
+  through the real provider), `ScanFailureBoundaryTest`, `ScanCoordinatorGenerationTest` and the
+  fifteen `ScreenshotTest` renderings of the real composables.
+  *Not verified:* no device is available, so the saving is not a measured scan duration — the claim
+  rests on the structure, and the honest bound is "at most the slowest stage" instead of "the sum of
+  ten". The whole suite also could not be completed as one `gradle testDebugUnitTest` here: it needs
+  about 15 minutes on this host and is killed at the 300 s call limit, so it was run as nine filtered
+  invocations covering every class, all green, none skipped.
+
+*Environment notes for the next run — none of them a repository change.* (1) Maven Central
+redirects large artifact jars to `gcp.mirrors.maven.org`, which this sandbox's egress policy refuses,
+so `testDebugUnitTest` could not resolve `org.robolectric:nativeruntime-dist-compat`. Pointing Gradle
+at Google's Maven Central mirror (`https://maven-central.storage-download.googleapis.com/maven2/`)
+through a `--init-script` resolved it, and Robolectric's own `android-all` downloads need the same
+mirror via `-Drobolectric.dependency.repo.url`. (2) A `testDebugUnitTest` call killed at the call
+limit can leave a **truncated** `android-all-instrumented` jar in `~/.m2`; Robolectric then fails a
+test with `NoSuchFieldError: noncompatWidthPixels` thrown from its own `DeviceConfig`, which reads
+exactly like a real regression. Check each cached jar against its `.sha512` before believing such a
+failure — `PermissionManagerTest.aPermissionThePlatformDoesNotHaveIsNotRequired` (`@Config(sdk = [30])`,
+so it needs the API-30 jar) was the victim here, and passed unchanged once that jar was complete.
+(3) `:app:mergeExtDexDebug` does not finish in one 300 s call at the repository's 1,400 MB heap on
+this host; `-Dorg.gradle.jvmargs="-Xmx1800m -XX:MaxMetaspaceSize=384m -XX:+UseSerialGC"` brings it in
+at 4m01s.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

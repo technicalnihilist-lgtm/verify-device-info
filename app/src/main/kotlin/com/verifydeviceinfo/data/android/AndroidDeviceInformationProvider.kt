@@ -22,6 +22,8 @@ import com.verifydeviceinfo.domain.DeviceInformationProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 /**
@@ -75,145 +77,168 @@ class AndroidDeviceInformationProvider(
                 onProgress(ScanProgress(done, total, label, finished = done == total))
             }
 
-            // 1. Identity and build properties
-            val identityResult = collectStage(timer, errors, "Identity collection") {
-                IdentityCollector(props).collect()
-            }
-            identityResult?.let {
-                fields += it.fields
-                fields += it.softwareFields
-            }
-            stage("Device identity and build properties")
+            // Every stage below reads a different system service and produces its own values; not
+            // one of them is an input to another. Run one after the other, a scan therefore cost
+            // the *sum* of ten stages whose time is almost entirely spent waiting for a Binder call
+            // to answer rather than computing — the property service, the package manager, the
+            // camera and sensor services, the audio service. They are all started here and awaited
+            // in the order below, so a scan costs its slowest stage instead of the sum of them.
+            //
+            // Nothing the user sees moves. The same eight progress steps are emitted, with the same
+            // labels, in the same order, and each is still emitted only after the work it labels has
+            // actually completed — a stage that finishes early is simply awaited earlier than the
+            // old code would have reached it. `fields` and `collectionErrors` are folded in in the
+            // same order as before, so the snapshot, and every report built from it, is identical.
+            // Each stage keeps its own deadline; what the whole scan can now cost is one stage
+            // deadline instead of the sum of them, which is exactly what the old whole-scan ceiling
+            // existed to bound.
+            coroutineScope {
+                val identityStage = async { timer.run { IdentityCollector(props).collect() } }
+                val hardwareStage = async { timer.run { HardwareCollector(context, props).collect() } }
+                val batteryStage = async { timer.run { BatteryCollector(context).collect() } }
+                val cameraStage = async { timer.run { CameraCollector(context).collect() } }
+                val sensorStage = async { timer.run { SensorCollector(context).collect() } }
+                val connectivityStage = async { timer.run { ConnectivityCollector(context).collect() } }
+                val audioStage = async { timer.run { AudioCollector(context).collect() } }
+                val securityStage = async { timer.run { SecurityCollector(context, props).collect() } }
+                val softwareStage = async { timer.run { SoftwareCollector(context).collect() } }
+                val strongBoxStage = async { timer.run { strongBoxFeature() } }
 
-            // 2. Processor, memory, storage, display
-            val hardwareResult = collectStage(timer, errors, "Hardware collection") {
-                HardwareCollector(context, props).collect()
-            }
-            hardwareResult?.let {
-                fields += it.fields
-                errors += it.errors
-            }
-            stage("Processor, memory and storage")
+                // 1. Identity and build properties
+                val identityResult =
+                    foldOutcome(errors, "Identity collection", identityStage.await(), timer)
+                identityResult?.let {
+                    fields += it.fields
+                    fields += it.softwareFields
+                }
+                stage("Device identity and build properties")
 
-            // 3. Battery
-            val batteryPair = collectStage(timer, errors, "Battery collection") {
-                BatteryCollector(context).collect()
-            }
-            batteryPair?.let { fields += it.second }
-            stage("Battery and power")
+                // 2. Processor, memory, storage, display
+                val hardwareResult =
+                    foldOutcome(errors, "Hardware collection", hardwareStage.await(), timer)
+                hardwareResult?.let {
+                    fields += it.fields
+                    errors += it.errors
+                }
+                stage("Processor, memory and storage")
 
-            // 4. Cameras
-            val cameraPair = collectStage(timer, errors, "Camera collection") {
-                CameraCollector(context).collect()
-            }
-            cameraPair?.let { fields += it.second }
-            stage("Camera modules")
+                // 3. Battery
+                val batteryPair =
+                    foldOutcome(errors, "Battery collection", batteryStage.await(), timer)
+                batteryPair?.let { fields += it.second }
+                stage("Battery and power")
 
-            // 5. Sensors
-            val sensorPair = collectStage(timer, errors, "Sensor collection") {
-                SensorCollector(context).collect()
-            }
-            sensorPair?.let { fields += it.second }
-            stage("Sensors")
+                // 4. Cameras
+                val cameraPair =
+                    foldOutcome(errors, "Camera collection", cameraStage.await(), timer)
+                cameraPair?.let { fields += it.second }
+                stage("Camera modules")
 
-            // 6. Connectivity
-            val connectivity = collectStage(timer, errors, "Connectivity collection") {
-                ConnectivityCollector(context).collect()
-            }
-            connectivity?.let { fields += it.fields }
+                // 5. Sensors
+                val sensorPair =
+                    foldOutcome(errors, "Sensor collection", sensorStage.await(), timer)
+                sensorPair?.let { fields += it.second }
+                stage("Sensors")
 
-            // 7. Audio and haptics
-            val audio = collectStage(timer, errors, "Audio collection") {
-                AudioCollector(context).collect()
-            }
-            audio?.let { fields += it.fields }
-            stage("Connectivity and audio")
+                // 6. Connectivity
+                val connectivity =
+                    foldOutcome(errors, "Connectivity collection", connectivityStage.await(), timer)
+                connectivity?.let { fields += it.fields }
 
-            // 8. Security, integrity and software inventory
-            val securityResult = collectStage(timer, errors, "Security collection") {
-                SecurityCollector(context, props).collect()
-            }
-            securityResult?.let {
-                fields += it.fields
-                fields += it.biometricFields
-            }
-            val softwarePair = collectStage(timer, errors, "Software inventory") {
-                SoftwareCollector(context).collect()
-            }
-            softwarePair?.let { fields += it.second }
-            stage("Security and installed software")
+                // 7. Audio and haptics
+                val audio = foldOutcome(errors, "Audio collection", audioStage.await(), timer)
+                audio?.let { fields += it.fields }
+                stage("Connectivity and audio")
 
-            // The one framework query in this method that is not a collector stage. `PackageManager`
-            // is a Binder call into the system service, so it can block like any other — and on a
-            // device whose package service has died it throws instead, which used to unwind the
-            // whole scan: every field the nine stages above had already collected was thrown away
-            // and the user was told "Scan failed" because one feature flag could not be read. Run
-            // it as a stage, like the collectors, so it gets the same deadline and a failure costs
-            // one `collectionErrors` line rather than the entire report.
-            val strongBoxAvailable = collectStage(timer, errors, "StrongBox feature check") {
-                strongBoxFeature()
-            } ?: false
+                // 8. Security, integrity and software inventory
+                val securityResult =
+                    foldOutcome(errors, "Security collection", securityStage.await(), timer)
+                securityResult?.let {
+                    fields += it.fields
+                    fields += it.biometricFields
+                }
+                val softwarePair =
+                    foldOutcome(errors, "Software inventory", softwareStage.await(), timer)
+                softwarePair?.let { fields += it.second }
+                stage("Security and installed software")
 
-            val hardware = HardwareFacts(
-                socManufacturer = identityResult?.identity?.socManufacturer,
-                socModel = identityResult?.identity?.socModel,
-                cpuAbis = hardwareResult?.cpuAbis.orEmpty(),
-                cpuCores = hardwareResult?.cpuCores ?: 0,
-                cpuMaxFreqKhz = hardwareResult?.cpuMaxFreqKhz,
-                cpuHardware = identityResult?.identity?.hardware ?: "Unknown",
-                gpuRenderer = hardwareResult?.gpuRenderer,
-                gpuVendor = hardwareResult?.gpuVendor,
-                glesVersion = hardwareResult?.glesVersion,
-                vulkanSupported = hardwareResult?.vulkanSupported,
-                ramTotalBytes = hardwareResult?.ramTotalBytes ?: 0L,
-                ramAvailableBytes = hardwareResult?.ramAvailableBytes ?: 0L,
-                isLowRamDevice = hardwareResult?.isLowRamDevice ?: false,
-                memoryClassMb = hardwareResult?.memoryClassMb ?: 0,
-                storageTotalBytes = hardwareResult?.storageTotalBytes ?: 0L,
-                storageAvailableBytes = hardwareResult?.storageAvailableBytes ?: 0L,
-                display = hardwareResult?.display,
-                cameras = cameraPair?.first.orEmpty(),
-                sensors = sensorPair?.first.orEmpty(),
-                biometricStrongAvailable = securityResult?.biometricStrongAvailable ?: false,
-                biometricAnyAvailable = securityResult?.biometricAnyAvailable ?: false,
-                strongBoxAvailable = strongBoxAvailable,
-                secureLockScreen = securityResult?.secureLockScreen ?: false,
-                vibratorAvailable = audio?.vibratorAvailable ?: false,
-                speakerAvailable = audio?.speakerAvailable ?: false,
-                microphoneAvailable = audio?.microphoneAvailable ?: false,
-                nfcAvailable = connectivity?.nfcAvailable ?: false,
-                bluetoothAvailable = connectivity?.bluetoothAvailable ?: false,
-                wifiAvailable = connectivity?.wifiAvailable ?: false,
-                gnssAvailable = connectivity?.gnssAvailable ?: false,
-                telephonyAvailable = connectivity?.telephonyAvailable ?: false,
-                usbHostAvailable = connectivity?.usbHostAvailable ?: false
-            )
+                // The one framework query in this method that is not a collector stage. `PackageManager`
+                // is a Binder call into the system service, so it can block like any other — and on a
+                // device whose package service has died it throws instead, which used to unwind the
+                // whole scan: every field the nine stages above had already collected was thrown away
+                // and the user was told "Scan failed" because one feature flag could not be read. Run
+                // it as a stage, like the collectors, so it gets the same deadline and a failure costs
+                // one `collectionErrors` line rather than the entire report.
+                val strongBoxAvailable = foldOutcome(
+                    errors, "StrongBox feature check", strongBoxStage.await(), timer
+                ) ?: false
 
-            DeviceSnapshot(
-                platform = Platform.ANDROID,
-                fields = fields,
-                identity = identityResult?.identity ?: fallbackIdentity(),
-                hardware = hardware,
-                battery = batteryPair?.first ?: fallbackBattery(),
-                security = securityResult?.facts ?: fallbackSecurity(),
-                software = softwarePair?.first ?: fallbackSoftware(),
-                collectedAtMillis = System.currentTimeMillis(),
-                appVersion = BuildConfig.VERSION_NAME,
-                collectionErrors = errors,
-                isMock = false
-            )
+                val hardware = HardwareFacts(
+                    socManufacturer = identityResult?.identity?.socManufacturer,
+                    socModel = identityResult?.identity?.socModel,
+                    cpuAbis = hardwareResult?.cpuAbis.orEmpty(),
+                    cpuCores = hardwareResult?.cpuCores ?: 0,
+                    cpuMaxFreqKhz = hardwareResult?.cpuMaxFreqKhz,
+                    cpuHardware = identityResult?.identity?.hardware ?: "Unknown",
+                    gpuRenderer = hardwareResult?.gpuRenderer,
+                    gpuVendor = hardwareResult?.gpuVendor,
+                    glesVersion = hardwareResult?.glesVersion,
+                    vulkanSupported = hardwareResult?.vulkanSupported,
+                    ramTotalBytes = hardwareResult?.ramTotalBytes ?: 0L,
+                    ramAvailableBytes = hardwareResult?.ramAvailableBytes ?: 0L,
+                    isLowRamDevice = hardwareResult?.isLowRamDevice ?: false,
+                    memoryClassMb = hardwareResult?.memoryClassMb ?: 0,
+                    storageTotalBytes = hardwareResult?.storageTotalBytes ?: 0L,
+                    storageAvailableBytes = hardwareResult?.storageAvailableBytes ?: 0L,
+                    display = hardwareResult?.display,
+                    cameras = cameraPair?.first.orEmpty(),
+                    sensors = sensorPair?.first.orEmpty(),
+                    biometricStrongAvailable = securityResult?.biometricStrongAvailable ?: false,
+                    biometricAnyAvailable = securityResult?.biometricAnyAvailable ?: false,
+                    strongBoxAvailable = strongBoxAvailable,
+                    secureLockScreen = securityResult?.secureLockScreen ?: false,
+                    vibratorAvailable = audio?.vibratorAvailable ?: false,
+                    speakerAvailable = audio?.speakerAvailable ?: false,
+                    microphoneAvailable = audio?.microphoneAvailable ?: false,
+                    nfcAvailable = connectivity?.nfcAvailable ?: false,
+                    bluetoothAvailable = connectivity?.bluetoothAvailable ?: false,
+                    wifiAvailable = connectivity?.wifiAvailable ?: false,
+                    gnssAvailable = connectivity?.gnssAvailable ?: false,
+                    telephonyAvailable = connectivity?.telephonyAvailable ?: false,
+                    usbHostAvailable = connectivity?.usbHostAvailable ?: false
+                )
+
+                DeviceSnapshot(
+                    platform = Platform.ANDROID,
+                    fields = fields,
+                    identity = identityResult?.identity ?: fallbackIdentity(),
+                    hardware = hardware,
+                    battery = batteryPair?.first ?: fallbackBattery(),
+                    security = securityResult?.facts ?: fallbackSecurity(),
+                    software = softwarePair?.first ?: fallbackSoftware(),
+                    collectedAtMillis = System.currentTimeMillis(),
+                    appVersion = BuildConfig.VERSION_NAME,
+                    collectionErrors = errors,
+                    isMock = false
+                )
+            }
         }
 
     /**
-     * Runs one stage and folds its outcome into [errors]. A failure keeps the message the app has
+     * Folds one finished stage's outcome into [errors]. A failure keeps the message the app has
      * always shown; a timeout says so instead of leaving the stage silently missing.
+     *
+     * This used to be `collectStage`, which also *ran* the stage. The stages are now started
+     * together and awaited one at a time, so running and folding are two steps: the outcome is
+     * folded in the same declaration order the stages used to run in, which is what keeps the
+     * `collectionErrors` list in the order every test and every report expects.
      */
-    private suspend fun <T> collectStage(
-        timer: StageTimer,
+    private fun <T> foldOutcome(
         errors: MutableList<String>,
         label: String,
-        block: suspend () -> T
-    ): T? = when (val outcome = timer.run(block)) {
+        outcome: StageOutcome<T>,
+        timer: StageTimer
+    ): T? = when (outcome) {
         is StageOutcome.Done -> outcome.value
         is StageOutcome.Failed -> {
             errors += "$label failed: ${outcome.error.message}"
