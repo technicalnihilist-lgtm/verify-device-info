@@ -3421,6 +3421,68 @@ analysis that follows the collection stages — and found real main-thread work 
   debug APK is not byte-reproducible on this toolchain (J1/J2) and no pre-change baseline was rebuilt
   this run. No screen, control, style, spacing, colour or copy change, and no reported value changes.
 
+## XX. Audit findings — 15 November run (sixth pass)
+
+The unchecked items were taken in file order and each was skipped for the reason it already records,
+not re-litigated: **F1** (R8) and **F3**/**I8** (lint) are sandbox-bound — `nproc` = 2 and
+`free` = 2,098 MB again this run, and neither `minifyReleaseWithR8` nor `lintAnalyzeDebug` finishes
+inside one 300 s call or resumes across calls (this run's cold `assembleDebug` needed six calls);
+**I10** duplicates the dependency audit recorded next to F5; **H2, H5, H7, H9, H11, H13, H14, M2,
+M3, M4** would change what the user reads on screen or in the exported report; **L2, P2, V2, MM2,
+MM3** move a reported value or verdict and need sign-off. Nothing was ticked that was not done.
+
+*Environment, for the next run:* the toolchain recipe from the 14 November pass still holds and was
+re-derived from scratch here. Two things are worth writing down again. `repo1.maven.org` and
+`repo.maven.apache.org` answer a *jar* request with a redirect to `gcp.mirrors.maven.org`, which the
+sandbox proxy refuses (502); the same artifact downloads fine from
+`maven-central.storage-download.googleapis.com`, and one GET of a 150 MB jar occasionally returns a
+`NoSuchKey` body, so a retry is needed. Gradle's own dependency resolution therefore needs the
+offline Robolectric runtime staged locally (`ROBOLECTRIC_DEPENDENCY_DIR`, five
+`android-all-instrumented` jars for SDK 29/30/33/34/35) plus an init script that puts a local file
+repository *first* — appending it does not work, because resolution fails on the remote before it
+reaches the local copy. With `-XX:TieredStopAtLevel=1 -XX:+UseSerialGC` on the Gradle JVM, a cold
+`assembleDebug` is six 300 s calls and the 68 test classes run in five filtered invocations of about
+three minutes each.
+
+Re-reading the history path for the "error paths that could be silent / destructive operations that
+are not ordered" lens produced one finding, which is implemented here.
+
+- [x] **XX1. `FileDiagnosticHistory.clear()` deleted the stored reports before the index that names
+  them.** The two deletions are not independent, and the order decided which half-state a clear can
+  stop in. `clear` removed every file under `history/reports/` first and `history/index.json` second,
+  so a clear interrupted between them — process killed, storage error, the user's device going
+  down — left the *worst* of the two states: the index still listing all fifty entries while every
+  document behind them was gone. That state is rendered, and it never repaired itself: the History
+  screen builds its list from the index and expands an entry by reading the document its id names, so
+  every entry opens to nothing; the next `save` reads that index and writes those same entries back
+  verbatim, and `pruneReports` finds no file left to remove, so the dead entries outlive every later
+  scan. The reverse interruption is invisible — an empty list, and report documents nothing points
+  at, which the next save's prune deletes — which is why the index has to go first. `clear` now
+  removes the index first, and only deletes the documents once it is gone; when the index cannot be
+  removed the documents are left alone, because that clear did not happen and deleting the documents
+  behind a surviving index is exactly the broken state above.
+  *Change:* one function, `FileDiagnosticHistory.clear`, in a file no screen imports; no file under
+  `res/` or `ui/` was touched, and no screen, control, style, layout or copy changed. What a
+  completed clear leaves behind is identical to before: no index, no reports.
+  *Tests:* `HistoryClearTest` (3 cases) drives the real store over a real filesystem: a clear empties
+  both the list and the documents; an index that cannot be removed (the history directory made
+  read-only) leaves the documents, the list and the stored text intact; and a document left behind by
+  a clear that stopped after its first step is invisible to the list and pruned by the next save.
+  The second case was confirmed to **fail** against the previous `clear` — "the documents were
+  deleted behind an index that is still there, expected:<[dd931535…]> but was:<[]>" — and to pass
+  after the change, so it pins the order rather than the happy path.
+  *Verification:* `assembleDebug` green. `testDebugUnitTest` green — **472 tests in 68 classes, 0
+  failures, 0 errors, 0 skipped** (469 before plus the three new ones), run in five `--tests`
+  invocations because one full-suite invocation does not finish inside this sandbox's 300 s command
+  limit; every class ran, none was skipped, and the 472 `@Test` annotations in the tree account for
+  the total. `tools/check-no-ui-change.sh` clean (31 files tracked under `ui/` and `res/`, none
+  differs). Debug APK 9,921,001 bytes — no size claim, since the debug APK is not byte-reproducible
+  on this toolchain and no pre-change baseline was rebuilt this run.
+  *Not verified:* no device is available, so the interruption is simulated by making the index
+  undeletable rather than by killing the process between the two deletions; and a clear that is
+  killed *after* the index is gone but *before* the documents are leaves files on disk until the next
+  save prunes them, which is the intended, invisible outcome but is not itself provoked here.
+
 ---
 
 ## When the list runs out

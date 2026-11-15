@@ -87,9 +87,27 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
         }
     }
 
+    /**
+     * Deletes the stored history.
+     *
+     * The index goes first and the report files second, because the index is the only one of the two
+     * the History screen renders. The order used to be the other way round, and the state a clear
+     * interrupted between the two deletions left behind is the one that cannot repair itself: every
+     * report file gone while the index still lists all of them, so the screen shows the whole
+     * history and every entry opens to nothing. It stayed that way, too — the next [save] starts
+     * from the entries it reads, so the entries pointing at deleted files are written back verbatim,
+     * and [pruneReports] has no file left to remove. Deleting the index first makes the same
+     * interruption harmless: an empty list, and report files that nothing points at, which the next
+     * save's prune removes.
+     *
+     * When the index cannot be removed the reports are left alone. That clear did not happen, and
+     * deleting the documents behind an index that is still on disk is the one outcome that turns a
+     * failed clear into a broken History screen.
+     */
     override suspend fun clear(): Unit = withContext(Dispatchers.IO) {
+        val index = indexFile
+        if (index.exists() && !index.delete()) return@withContext
         reportDir.listFiles()?.forEach { it.delete() }
-        indexFile.delete()
         Unit
     }
 
