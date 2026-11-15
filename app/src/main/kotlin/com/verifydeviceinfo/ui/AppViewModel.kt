@@ -4,11 +4,16 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.verifydeviceinfo.AppContainer
+import com.verifydeviceinfo.core.model.AgeReport
+import com.verifydeviceinfo.core.model.AuthenticityReport
 import com.verifydeviceinfo.core.model.DeviceReport
 import com.verifydeviceinfo.core.model.DeviceSnapshot
 import com.verifydeviceinfo.core.model.DiagnosticResult
 import com.verifydeviceinfo.core.model.DiagnosticSession
+import com.verifydeviceinfo.core.model.HealthScores
 import com.verifydeviceinfo.core.model.HistoryEntry
+import com.verifydeviceinfo.core.model.IntegrityReport
+import com.verifydeviceinfo.core.model.PartsReport
 import com.verifydeviceinfo.core.model.ReferenceMatch
 import com.verifydeviceinfo.core.model.ScanProgress
 import com.verifydeviceinfo.core.util.LatestRequest
@@ -97,26 +102,42 @@ class AppViewModel @JvmOverloads constructor(
                 // StrictMode disk read, and a dropped frame or two on a cold first scan. The values
                 // are identical either way: `match` is a pure function of the snapshot's three
                 // identity strings, and its result is published with everything else at the end of
-                // the scan. The analysis that follows is CPU-only (measured at well under a
-                // millisecond on the JVM fixture) and stays where it is.
+                // the scan.
                 val reference = withContext(Dispatchers.IO) {
                     container.referenceRepository.match(
                         snapshot.identity.model, snapshot.identity.brand, snapshot.identity.device
                     )
                 }
-                val authenticity = container.authenticityEngine.analyze(snapshot, reference)
+                // The five analyzers are pure functions of the snapshot, the reference, the session
+                // and the purchase date, and they are the last CPU work of a scan. They used to run
+                // on the main thread, between the collector's last progress update and the report
+                // being published: measured on the JVM fixture, one report's worth costs ~0.65 ms
+                // of analysis alone, which is a mid-range phone's several milliseconds of a 16.6 ms
+                // frame — dropped inside the frame that draws "Complete". They now run on
+                // `Dispatchers.Default`, and the scan's own scope still publishes nothing until they
+                // all return, so the report, the state and every value in it are unchanged; only the
+                // thread they are computed on is. `session` and the purchase date are read here, on
+                // the main thread, before the hop — the same instant they were read at before.
                 val session = _state.value.session
-                val parts = container.partsProvider.assess(snapshot, reference, session)
-                val age = container.ageEstimator.estimate(snapshot, reference, container.purchaseDateMillis)
-                val integrity = container.integrityAnalyzer.analyze(snapshot)
-                val scores = container.scoreEngine.score(snapshot, parts, integrity, session)
+                val purchaseDateMillis = container.purchaseDateMillis
+                val analysis = withContext(Dispatchers.Default) {
+                    val parts = container.partsProvider.assess(snapshot, reference, session)
+                    val integrity = container.integrityAnalyzer.analyze(snapshot)
+                    ScanAnalysis(
+                        authenticity = container.authenticityEngine.analyze(snapshot, reference),
+                        parts = parts,
+                        age = container.ageEstimator.estimate(snapshot, reference, purchaseDateMillis),
+                        integrity = integrity,
+                        scores = container.scoreEngine.score(snapshot, parts, integrity, session)
+                    )
+                }
                 val report = DeviceReport(
                     snapshot = snapshot,
-                    authenticity = authenticity,
-                    parts = parts,
-                    age = age,
-                    integrity = integrity,
-                    scores = scores,
+                    authenticity = analysis.authenticity,
+                    parts = analysis.parts,
+                    age = analysis.age,
+                    integrity = analysis.integrity,
+                    scores = analysis.scores,
                     session = session,
                     generatedAtMillis = System.currentTimeMillis(),
                     appVersion = snapshot.appVersion,
@@ -338,3 +359,18 @@ class AppViewModel @JvmOverloads constructor(
         _state.value = current.copy(report = report)
     }
 }
+
+/**
+ * The five analyzer outputs of one scan, computed together off the main thread.
+ *
+ * A named holder rather than five `withContext` results because [AppViewModel.scan] has to build
+ * the report from all five at once: returning them separately would either run five dispatches or
+ * carry a `List<Any>` that the report construction then has to cast.
+ */
+private data class ScanAnalysis(
+    val authenticity: AuthenticityReport,
+    val parts: PartsReport,
+    val age: AgeReport,
+    val integrity: IntegrityReport,
+    val scores: HealthScores
+)

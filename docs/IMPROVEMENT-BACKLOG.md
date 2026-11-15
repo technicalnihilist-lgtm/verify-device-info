@@ -3364,6 +3364,65 @@ only step of a scan that touches the disk was running on the UI thread.
 
 ---
 
+## WW. Audit findings — 15 November run (fifth pass)
+
+The nineteen unchecked items were re-read in file order and each was skipped for the reason its own
+entry records, re-checked rather than assumed where it was cheap to do so: **F1** (`minifyReleaseWithR8`)
+and **F3**/**I8** (`lintAnalyzeDebug`) are bound to this host — `nproc` = 2 and `free` = 2,098 MB again,
+the same figures every earlier pass measured, and this run's cold `assembleDebug` again needed five
+300 s calls, so neither non-resumable task has a window here; **G1** and **I10** duplicate measurements
+already recorded beside their items; **H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** would change what
+the user reads on a screen or in the exported report; **L2, P2, V2, MM2, MM3** move a reported value,
+a verdict or a score and need sign-off. Nothing was ticked that was not done.
+
+Two suspicions were checked against the code before anything was written, and both were **refuted**,
+which is why neither became an item:
+
+- `AppViewModel.runAutomatedDiagnostics` looked like a lost update — `var session = _state.value.session`
+  followed by `_state.value = _state.value.copy(session = session)` after a multi-second suspension.
+  It is not: the session is read *after* `runAutomatedChecks()` returns, not before it, and the read
+  and the write are both on the main thread with no suspension point between them. A three-case test
+  was written to pin it, confirmed to pass against the unchanged code, and then discarded rather than
+  committed as a change that changes nothing.
+- `SensorProbe.start`/`probeLiveness` and `AudioProbe` looked like they could leave a listener or a
+  recorder registered when a probe times out; both already release on the timeout path
+  (`invokeOnCancellation`) and on every failure path, with tests that cover it.
+
+The audit then re-read the one part of the scan the earlier passes had left on the UI thread — the
+analysis that follows the collection stages — and found real main-thread work there.
+
+- [x] **WW1. The five analyzers of a scan ran on the main thread, in the frame that draws the last
+  progress step.** `AppViewModel.scan` runs on `viewModelScope` (`Dispatchers.Main.immediate`), and
+  `provider.collect` only hops to `Dispatchers.IO` for its own stages. After it returned, the scan
+  called `authenticityEngine.analyze`, `partsProvider.assess`, `ageEstimator.estimate`,
+  `integrityAnalyzer.analyze` and `scoreEngine.score` in the same block, so all five ran inside a
+  main-thread frame between the collector's last `stage(...)` update and the report being published.
+  The comment beside them claimed the cost was "well under a millisecond on the JVM fixture"; measured
+  on this host it is **0.649 ms minimum per report** for the five together (warm, 500 rounds, mock
+  snapshot), which a mid-range phone multiplies several times over out of a 16.6 ms frame — dropped
+  exactly when the user is watching the scan finish.
+  *Change:* the five calls now run inside one `withContext(Dispatchers.Default) { … }`, returning a
+  private `ScanAnalysis` holder that the report is then built from. They are pure functions of the
+  snapshot, the reference, the session and the purchase date, and nothing is published until all five
+  return, so the report, the state, the JSON export and every rendered value are unchanged — only the
+  thread they are computed on. `session` and `container.purchaseDateMillis` are read on the main
+  thread *before* the hop, which is the same instant they were read at before; the purchase-date read
+  (a `SharedPreferences` lookup) now happens before the hop rather than inside it.
+  `AppContainer` gains an `authenticityEngineOverride` parameter, in the same shape as its four
+  existing test seams, so the thread can be observed.
+  *Tests:* three in the new `ScanAnalysisThreadTest`, driving the real `AppViewModel.scan` with a
+  recording engine: the analysis does not run on the main looper's thread (confirmed to **fail** when
+  the dispatch is put back to `Dispatchers.Main`, then restored), it is still handed the snapshot the
+  report is built from and the reference the scan resolved, and its output still reaches both the
+  report and the published state. `assembleDebug` green; `testDebugUnitTest` green — **469 tests in 67
+  classes, 0 failures, 0 errors, 0 skipped** (466 before, 3 new). `tools/check-no-ui-change.sh` clean
+  (31 files tracked under `ui/` and `res/`, none differs; `AppViewModel.kt` is the gate's one declared
+  non-rendering exemption and still proves it). Debug APK 9,844,376 bytes — no size claim, since the
+  debug APK is not byte-reproducible on this toolchain (J1/J2) and no pre-change baseline was rebuilt
+  this run. No screen, control, style, spacing, colour or copy change, and no reported value changes.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

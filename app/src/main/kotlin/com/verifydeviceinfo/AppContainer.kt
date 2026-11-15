@@ -33,7 +33,8 @@ import com.verifydeviceinfo.domain.analysis.DefaultScoreEngine
  * The `…Override` parameters exist so a test can hand the graph a collaborator that fails in a way
  * a real device cannot be made to fail — a `LinkageError` out of the collection stage, for example —
  * or one that records how it was called, which is how `ReferenceLoadThreadTest` proves the reference
- * lookup no longer runs on the main thread. Production passes none of them and gets exactly the
+ * lookup no longer runs on the main thread and how `ScanAnalysisThreadTest` proves the analysis
+ * after it does not either. Production passes none of them and gets exactly the
  * previous wiring, so nothing about the app's behaviour depends on them.
  */
 class AppContainer(
@@ -41,7 +42,8 @@ class AppContainer(
     deviceInformationProviderOverride: DeviceInformationProvider? = null,
     diagnosticsEngineOverride: HardwareDiagnosticsEngine? = null,
     historyOverride: LocalDiagnosticHistory? = null,
-    referenceRepositoryOverride: ReferenceRepository? = null
+    referenceRepositoryOverride: ReferenceRepository? = null,
+    authenticityEngineOverride: AuthenticityAnalysisEngine? = null
 ) {
 
     private val preferences =
@@ -62,7 +64,8 @@ class AppContainer(
     val diagnosticsEngine: HardwareDiagnosticsEngine =
         diagnosticsEngineOverride
             ?: AndroidHardwareDiagnosticsEngine(application, permissionManager)
-    val authenticityEngine: AuthenticityAnalysisEngine = DefaultAuthenticityEngine()
+    val authenticityEngine: AuthenticityAnalysisEngine =
+        authenticityEngineOverride ?: DefaultAuthenticityEngine()
     val partsProvider: PartsVerificationProvider = DefaultPartsProvider()
     val ageEstimator: DeviceAgeEstimator = DefaultAgeEstimator()
     val integrityAnalyzer: SystemIntegrityAnalyzer = DefaultIntegrityAnalyzer()
