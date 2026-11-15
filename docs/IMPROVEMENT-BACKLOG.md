@@ -3187,6 +3187,54 @@ thing that costs the user something on every screen-on and changes nothing they 
 
 ---
 
+## TT. Audit findings — 15 November run (second pass)
+
+The nineteen unchecked items were re-read in file order and each was skipped for the reason its own
+entry already records, not re-litigated: **F1** (R8), **F3** and **I8** (lint) are sandbox-bound —
+`nproc` = 2, `free` = 2,098 MB, the same host as every attempt above, and this run's cold
+`assembleDebug` needed seven 300 s calls before it first went green, so neither the non-resumable
+`minifyReleaseWithR8` nor `lintAnalyzeDebug` has a window here; **I10** duplicates the classpath
+audit F5 already recorded; **H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** would change what the user
+reads on screen or in the exported report; **L2, P2, V2, MM2, MM3** move a reported value or verdict
+and need sign-off. Nothing was ticked that was not done.
+
+The audit then re-read the paths the last passes had looked at least — the diagnostics engine, the
+collectors, the reference loader, the probes and the history store — and found one thing worth
+changing: a constant catalogue rebuilt on every read.
+
+- [x] **TT1. The interactive diagnostics catalogue is rebuilt on every call, and nothing pinned
+  it.** `AndroidHardwareDiagnosticsEngine.availableTests()` returned a `listOf(...)` written in the
+  body of the function, so every call allocated a fresh 22-element backing array, its list wrapper
+  and 22 `DiagnosticTestDescriptor` objects. `DiagnosticsScreen` calls it once per *recomposition*,
+  not once per screen, so a visit that ran the automated pass and then tapped a couple of
+  interactive tests rebuilt the whole catalogue several times over for a value that cannot change:
+  every descriptor in it is a constant, and no field of it is read from the `Context`, from the
+  device or from the `AndroidPermissionManager`. *Change:* the list is now a `private val` built
+  once and `availableTests()` returns it, so a call allocates nothing. No descriptor, string,
+  category, permission or flag changed; the app creates exactly one engine (`AppContainer` holds it
+  for the process), and the one reader only reads the list. *Also fixed by the same commit:* the
+  catalogue was pinned by no test at all — `AutomatedChecksTest` pins the ids the automated pass
+  *reports*, but nothing pinned the 22 descriptors the screen *lists*, so a dropped, duplicated or
+  reordered entry, a row moved to another category or a permission that went missing would have
+  surfaced only as a changed `07-diagnostics` screenshot, which a deliberate screenshot update
+  would have swallowed. New `DiagnosticsCatalogueTest` (5 tests) pins the whole catalogue in render
+  order — id, category, required permission and `requiresManualConfirmation` per row, `automated`
+  false throughout, every row carrying a title and a description — and pins the "built once"
+  guarantee by asserting that repeated calls return the same instance, which is the assertion that
+  fails if the catalogue ever goes back to being built per call. *Verification:* `assembleDebug`
+  green, APK 9,844,376 bytes (unchanged); the whole suite green — **462 tests, 65 classes, 0
+  failures, 0 errors, 0 skipped**, 457 before plus the 5 new ones — including the seven
+  `ScreenshotTest` renderings of the real composables, the Diagnostics screen among them, so the
+  pixels the project asserts on are unchanged. *Not verified:* the whole-suite invocation was not
+  completed as a single `gradle testDebugUnitTest` in this sandbox — it needs about 15 minutes here
+  and is killed at the 300 s call limit (19 of 65 classes had finished when it was killed), so the
+  suite was run as five filtered invocations covering every class, all green. No device is
+  available, so nothing here is a handset measurement: the "before" is the allocation the call used
+  to make (22 descriptors plus their list per call, several times per visit to the screen), not a
+  timed profile.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

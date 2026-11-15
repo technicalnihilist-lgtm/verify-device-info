@@ -29,7 +29,27 @@ class AndroidHardwareDiagnosticsEngine(
     private val permissionManager: AndroidPermissionManager
 ) : HardwareDiagnosticsEngine {
 
-    override fun availableTests(): List<DiagnosticTestDescriptor> = listOf(
+    override fun availableTests(): List<DiagnosticTestDescriptor> = catalogue
+
+    /**
+     * The interactive test catalogue, built once instead of once per call.
+     *
+     * Every descriptor here is a constant: no field of it is read from the device, from the
+     * [Context] or from the [AndroidPermissionManager], which is why the list can be built at
+     * construction. It used to be a `listOf(...)` in the body of [availableTests], so every call
+     * allocated a fresh 22-element backing array, its list wrapper and 22
+     * [DiagnosticTestDescriptor] objects — and `DiagnosticsScreen` calls it once per recomposition,
+     * not once per screen, so a visit that runs an automated pass and taps a couple of interactive
+     * tests rebuilt the whole catalogue several times over for a value that cannot change.
+     *
+     * The app creates exactly one engine ([com.verifydeviceinfo.AppContainer] holds it for the
+     * process), so this is one build per process. Returning the same instance to every caller is
+     * safe because the one reader, `DiagnosticsScreen`, only reads it (`groupBy` for the section
+     * list and `items` for the rows), and `DiagnosticsCatalogueTest` pins both the instance and the
+     * exact contents, so a caller that started mutating it — or a descriptor that changed — breaks
+     * a test instead of quietly changing what the screen lists.
+     */
+    private val catalogue: List<DiagnosticTestDescriptor> = listOf(
         DiagnosticTestDescriptor(
             "touch", "Multi-touch and dead zones",
             "Draw across the whole panel to prove every region responds, and press with several " +
