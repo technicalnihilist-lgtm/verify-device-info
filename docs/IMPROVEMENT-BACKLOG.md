@@ -3485,6 +3485,76 @@ are not ordered" lens produced one finding, which is implemented here.
 
 ---
 
+## YY. Audit findings — 16 November run
+
+The unchecked items were taken in file order and each was skipped for the reason it already
+records, not re-litigated: **F1** (R8) and **F3**/**I8** (lint) are sandbox-bound — `nproc` = 2 and
+`free` = 2,098 MB again this run, and neither `minifyReleaseWithR8` nor `lintAnalyzeDebug` finishes
+inside one 300 s call or resumes across calls (this run's cold `assembleDebug` needed four);
+**I10** duplicates the dependency audit recorded next to F5; **H2, H5, H7, H9, H11, H13, H14, M2,
+M3, M4** would change what the user reads on screen or in the exported report; **L2, P2, V2, MM2,
+MM3** move a reported value or verdict and need sign-off. Nothing was ticked that was not done, and
+no production file differs from the previous commit.
+
+*Environment, for the next run:* the unit tests run here without staging anything by hand. The one
+artifact Maven Central refuses through this proxy (`org.robolectric:nativeruntime-dist-compat:1.0.16`
+— the redirect to `gcp.mirrors.maven.org` answers 502) downloads fine from
+`maven-central.storage-download.googleapis.com`; serve it from a local file repository registered in
+an init script's `beforeSettings`, because `RepositoriesMode.FAIL_ON_PROJECT_REPOS` in
+`settings.gradle.kts` ignores project repositories and appending the file repository is too late —
+resolution fails on the remote first. `robolectric.dependency.repo.url` set to the same mirror on the
+`Test` tasks lets Robolectric fetch its own `android-all-instrumented` jars, so no offline dependency
+directory is needed. A Robolectric class runs in about a minute once warm; the whole suite still
+needs five filtered invocations.
+
+Two findings were re-read against the code and **cleared**, so the next run need not repeat them:
+
+* **The PDF export's `Paint.measureText(CharSequence, int, int)` call is not a min-SDK gap.** The
+  wrap measures the `StringBuilder` it is building with the `CharSequence` overload, which is not in
+  the API-26 stub list one would guess from the API-29 `MeasuredText` family — the overload was
+  checked against the real `android.jar` of platform 26 (`platform-26_r02`) and platform 28
+  (`platform-28_r06`) and is present in both. A sweep of every framework member the compiled classes
+  reference against the API-26 jar found only members that are already guarded by an `SDK_INT`
+  check: `Build.SOC_MANUFACTURER`/`SOC_MODEL`, `PackageInfo.signingInfo`,
+  `PackageManager.getInstallSourceInfo`, `CameraCharacteristics.getPhysicalCameraIds`,
+  `CameraDevice.createCaptureSession(SessionConfiguration)`, `PowerManager.getCurrentThermalStatus`,
+  `Display.Mode.getSupportedHdrTypes` and `WindowManager.getMaximumWindowMetrics`.
+* **Robolectric cannot stand in for a missing framework method**, so it cannot pin an API-level
+  regression: its shadows carry every method of the newest framework whatever `@Config(sdk = …)`
+  emulates. Measured directly: `Paint.measureText(CharSequence, 0, len)` answered normally under
+  `@Config(sdk = [28])`. An API-level guard can only be checked against a real `android.jar`, not
+  from a unit test.
+
+One finding did clear the bar as a *finding*, and it is the one thing this run did not implement:
+
+- [ ] **YY1. A save whose report document cannot be written lists the entry anyway, and that dead
+  entry never goes away.** `FileDiagnosticHistory.save` writes the document and the index entry that
+  names it, and the document write is deliberately best-effort — `save` runs inside the scan's own
+  `try` block, so a storage error must not discard a scan that has already finished. The entry was
+  then added to the index whether or not the document behind it had been written. The index is what
+  puts a report on the History screen and the screen re-opens a report by reading the document its
+  id names, so such an entry is a row that expands to nothing — and it is permanent: the next save
+  reads that index and writes the dead entry back verbatim, and `pruneReports` only deletes files
+  the index does not account for, so it has nothing to remove. Only clearing the app's data removes
+  it. This is the same broken half-state `XX1` fixed for `clear`, on the `save` path and in the
+  other direction. *Change:* index the entry only once `atomicWriteText` has returned (a `stored`
+  flag around the existing `try`), which is what `clear` already does by deleting the index first;
+  the write itself stays best-effort, and what a failed document write degrades to is what a failed
+  index write already degrades to — "this scan is not listed", the state
+  `HistoryIndexFailureTest` documents and pins for the other half of the save.
+  *Needs sign-off:* on a failed document write the History screen shows one row fewer than it does
+  today, which is a change to what the user sees (in a failure path only, but still), and the
+  current behaviour is pinned deliberately by
+  `HistoryReportWriteTest.a report that cannot be stored leaves no partial file`, so the fix has to
+  change that assertion and the comment beside it.
+  *Evidence (16 Nov run):* the fix and a three-case `HistoryReportWriteFailureTest` were written and
+  run. All three cases failed against the current code — after a read-only `history/reports/`,
+  `history.list()` returned one entry whose `loadRaw` is null and whose document was absent from
+  disk — and all three passed with the `stored` flag applied, as did `HistoryIndexFailureTest` and
+  `HistoryClearTest`. `HistoryReportWriteTest` then failed on its pinned assertion, which is exactly
+  the sign-off boundary this item is waiting on, so the change and the test were reverted and no
+  production file was touched. The tree this run leaves behind is the previous commit.
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:
