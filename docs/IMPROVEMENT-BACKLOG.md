@@ -3301,6 +3301,69 @@ at 4m01s.
 
 ---
 
+## VV. Audit findings — 15 November run (fourth pass)
+
+The nineteen unchecked items were re-read in file order and each was skipped for the reason its own
+entry records, not re-litigated: **F1** (R8), **F3** and **I8** (lint) are sandbox-bound — `nproc` =
+2, `free` = 2,098 MB, and this run's cold `assembleDebug` needed eleven 300 s calls before it went
+green, so neither the non-resumable `minifyReleaseWithR8` nor `lintAnalyzeDebug` has a window here;
+**I10** duplicates the classpath audit F5 already recorded; **H2, H5, H7, H9, H11, H13, H14, M2,
+M3, M4** would change what the user reads on screen or in the exported report; **L2, P2, V2, MM2,
+MM3** move a reported value or verdict and need sign-off. Nothing was ticked that was not done.
+
+The audit then re-read the one path every scan takes that the earlier sections had looked at stage
+by stage: what the scan does *between* the collectors and the published report. It found that the
+only step of a scan that touches the disk was running on the UI thread.
+
+- [x] **VV1. The reference lookup read the bundled asset on the main thread.**
+  `AppViewModel.scan` runs inside `ScanCoordinator.start`, which is `viewModelScope.launch` on
+  `Dispatchers.Main.immediate`; `provider.collect` hops to `Dispatchers.IO` for its own stages and
+  returns to the caller's context, so everything after it — including
+  `container.referenceRepository.match(model, brand, device)` — ran on the main thread.
+  `AssetReferenceRepository` is lazily and parse-once loaded, so the *first* `match` of a process
+  opens `device_reference.json` from the APK assets (**14,907 bytes**), reads it, parses it with
+  `org.json` and builds the `ReferenceIndex` — a StrictMode disk read plus a JSON parse on the UI
+  thread, at the exact moment the scan animation starts. Every later scan hits the latch and costs a
+  map lookup, which is why this only ever showed as jank on a cold first scan.
+  *Change:* the lookup is wrapped in `withContext(Dispatchers.IO)`. Nothing else in the block moves.
+  `match` is a pure function of the snapshot's three identity strings and its result is published
+  with the rest of the scan at the end, so the snapshot, the reference, the report and every derived
+  value are identical; the analysis that follows is CPU-only (measured at ~0.5 ms per rebuild on the
+  JVM fixture in the M5 note) and stays on the main thread. `AppContainer` gained a
+  `referenceRepositoryOverride` parameter, in the same shape as its three existing overrides, so the
+  thread can be observed by a test; production passes none and gets the previous wiring.
+  *Tests:* `ReferenceLoadThreadTest` (4 cases, Robolectric, the real `AppViewModel.scan` with the
+  debug mock provider): the repository is asked exactly once per scan and **never on
+  `Looper.getMainLooper().thread`**; the three identity strings the lookup receives are the
+  snapshot's own; a matched reference is published as `state.reference` unchanged, so the off-thread
+  answer still reaches the screens; and an unmatched scan still produces a report. The first case is
+  the one that would have failed before the change — it is the assertion that pins the thread.
+  *Size:* debug APK **10,000,167 → 10,000,529 bytes (+362)** — one lambda class and one constructor
+  parameter, nothing added to the app. Both numbers were produced on this host by reverting the two
+  changed files, rebuilding and measuring, then restoring them and rebuilding again; the campaign's
+  older `9,844,376`-byte figure did not reproduce here, because that APK was packaged from the
+  partially stale dex state an interrupted `assembleDebug` leaves behind (this run needed eleven
+  300 s calls to get its first green build).
+  *Not verified:* the saving is not a measured frame drop — no device is available here, and
+  Robolectric's asset read is not a real APK read. The claim is structural: the read is off the UI
+  thread, and the parse of the 14,907-byte asset no longer runs inside the frame that starts a scan.
+  *Build environment, for the next run (environment only, nothing in the tree):* keeping the Gradle
+  daemon alive (`-Dorg.gradle.daemon=true`) is the lever that makes this host usable. With
+  `-Xmx1400m -XX:MaxMetaspaceSize=512m -XX:TieredStopAtLevel=1 -XX:+UseSerialGC` a cold
+  `:app:compileDebugKotlin` finished in 3m59s and the rest of `assembleDebug` in 3m28s, where
+  `org.gradle.daemon=false` (the repo default) had killed every attempt at 285 s with no class file
+  on disk. `:app:mergeExtDexDebug` still needs its own call (4m41s at a 1,400 MB heap). The unit
+  suite needs two more environment-only pieces: the mirror must be `addFirst` in
+  `dependencyResolutionManagement.repositories` (Maven Central 302s to `gcp.mirrors.maven.org`,
+  which the proxy refuses with a 502, for `org.robolectric:nativeruntime-dist-compat:1.0.16`), and
+  `ROBOLECTRIC_DEPENDENCY_DIR` must hold the five `android-all-instrumented` jars — SDK 29, 30, 33,
+  34 and **35** (`10-robolectric-5803371-i7`, `11-robolectric-6757853-i7`, `13-robolectric-9030017-i7`,
+  `14-robolectric-10818077-i7`, `15-robolectric-12650502-i7`). With those, the whole suite is green
+  here: **466 tests, 66 classes, 0 failures, 0 errors, 0 skipped**, run as five filtered invocations
+  because one `testDebugUnitTest` takes longer than a 300 s call on this host.
+
+---
+
 ## When the list runs out
 
 If fewer than ten unchecked items remain, do not lower the bar and do not invent work. Instead:

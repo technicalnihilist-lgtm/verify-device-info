@@ -14,11 +14,13 @@ import com.verifydeviceinfo.core.model.ScanProgress
 import com.verifydeviceinfo.core.util.LatestRequest
 import com.verifydeviceinfo.core.util.ScanCoordinator
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 data class UiState(
@@ -87,9 +89,21 @@ class AppViewModel @JvmOverloads constructor(
                 val snapshot = provider.collect { progress ->
                     publish(generation) { it.copy(progress = progress) }
                 }
-                val reference = container.referenceRepository.match(
-                    snapshot.identity.model, snapshot.identity.brand, snapshot.identity.device
-                )
+                // The reference lookup is the only step of a scan that touches the disk: on the
+                // first scan of a process it opens the bundled `device_reference.json` asset, reads
+                // it, parses it and builds the matching index, all behind `AssetReferenceRepository`'s
+                // parse-once latch. `ScanCoordinator.start` runs this block on the view model's
+                // main-thread scope, so that read and parse used to happen on the UI thread — a
+                // StrictMode disk read, and a dropped frame or two on a cold first scan. The values
+                // are identical either way: `match` is a pure function of the snapshot's three
+                // identity strings, and its result is published with everything else at the end of
+                // the scan. The analysis that follows is CPU-only (measured at well under a
+                // millisecond on the JVM fixture) and stays where it is.
+                val reference = withContext(Dispatchers.IO) {
+                    container.referenceRepository.match(
+                        snapshot.identity.model, snapshot.identity.brand, snapshot.identity.device
+                    )
+                }
                 val authenticity = container.authenticityEngine.analyze(snapshot, reference)
                 val session = _state.value.session
                 val parts = container.partsProvider.assess(snapshot, reference, session)

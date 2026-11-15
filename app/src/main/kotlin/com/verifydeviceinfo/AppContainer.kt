@@ -30,16 +30,18 @@ import com.verifydeviceinfo.domain.analysis.DefaultScoreEngine
  * Manual dependency graph. Deliberately plain: no annotation processor, no reflection-based DI,
  * so the wiring is readable and the build stays fast.
  *
- * The two `…Override` parameters exist so a test can hand the graph a collaborator that fails in a
- * way a real device cannot be made to fail — a `LinkageError` out of the collection stage, for
- * example. Production passes neither and gets exactly the previous wiring, so nothing about the
- * app's behaviour depends on them.
+ * The `…Override` parameters exist so a test can hand the graph a collaborator that fails in a way
+ * a real device cannot be made to fail — a `LinkageError` out of the collection stage, for example —
+ * or one that records how it was called, which is how `ReferenceLoadThreadTest` proves the reference
+ * lookup no longer runs on the main thread. Production passes none of them and gets exactly the
+ * previous wiring, so nothing about the app's behaviour depends on them.
  */
 class AppContainer(
     private val application: Application,
     deviceInformationProviderOverride: DeviceInformationProvider? = null,
     diagnosticsEngineOverride: HardwareDiagnosticsEngine? = null,
-    historyOverride: LocalDiagnosticHistory? = null
+    historyOverride: LocalDiagnosticHistory? = null,
+    referenceRepositoryOverride: ReferenceRepository? = null
 ) {
 
     private val preferences =
@@ -51,7 +53,8 @@ class AppContainer(
      */
     val systemPropertyReader = SystemPropertyReader()
 
-    val referenceRepository: ReferenceRepository = AssetReferenceRepository(application)
+    val referenceRepository: ReferenceRepository =
+        referenceRepositoryOverride ?: AssetReferenceRepository(application)
     val permissionManager = AndroidPermissionManager(application)
     val deviceInformationProvider: DeviceInformationProvider =
         deviceInformationProviderOverride
