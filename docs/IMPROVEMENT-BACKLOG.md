@@ -503,6 +503,11 @@ build and tests green before committing.
   rather than a guessed one: the earlier attempts put ~265 s of *pure R8* in a 288 s call on a host
   that is faster than this one, so even with this run's build fix (see the OO section, which makes a
   cold `:app:compileDebugKotlin` fit inside one call) `minifyReleaseWithR8` has no window here.
+  *Passed over (16 Nov run):* unchanged — `nproc` = 2, `free` = 2,098 MB. Not retried: this run
+  spent its build budget getting `:app:lintDebug` (F3) to complete for the first time, and a release
+  R8 run needs the whole release input chain built first (`:app:compileReleaseKotlin` and its
+  dependency graph, several calls on this host) before the non-resumable `minifyReleaseWithR8` even
+  starts. Nothing about that changed today.
 
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
@@ -522,7 +527,7 @@ build and tests green before committing.
   not the same boolean, so adopting it would change the reported evidence). 17 unused imports removed;
   `@OptIn(ExperimentalCoroutinesApi::class)` added to `ScanCoordinatorTest`. `assembleDebug` and all
   205 unit tests green. No UI, copy or layout change.
-- [ ] **F3. Run `gradle lint` and triage.** Fix real findings, suppress the noise with reasons.
+- [x] **F3. Run `gradle lint` and triage.** Fix real findings, suppress the noise with reasons.
   *Deferred (5 Nov, second run):* lint cannot complete here. `:app:lintDebug` runs the main, androidTest
   and unit-test analyses in parallel on 2 cores and is killed at 240 s; even `:app:lintAnalyzeDebug`
   alone (after the dependency downloads were cached) exceeds a 236 s call, and the analysis is not
@@ -567,6 +572,70 @@ build and tests green before committing.
   multi-minute analysis on the same two cores, and this run spent its build budget proving that
   `assembleDebug` and the suite can run here at all. Worth retrying first on the next run, now that
   a cold Kotlin compile no longer eats the whole call.
+
+  *Done (16 Nov run):* `gradle :app:lintDebug` completed for the first time in this campaign and the
+  report was triaged issue by issue. Getting it to finish took two levers, both environment-only:
+  `-XX:TieredStopAtLevel=1 -XX:+UseSerialGC` on the Gradle JVM (the OO section's fix), and the fact
+  that AGP runs one analysis task per source set (`lintAnalyzeDebug`, `…DebugAndroidTest`,
+  `…DebugUnitTest`), each of which caches separately — so a run killed at the 300 s call limit keeps
+  whatever analyses had already finished, and the report appears on a later call. The complete
+  report (6 errors, 13 warnings, 13 issue types) is the input to everything below.
+
+  *Real defects found and fixed:*
+  1. **`SecurityCollector` called `BiometricManager.canAuthenticate(int)` behind an API 29 guard, but
+     the method is API 30.** On Android 10 the call reached a method the platform does not have, and
+     `NoSuchMethodError` — a `LinkageError`, which `StageTimer` deliberately contains as a *failed
+     stage* — took the whole security stage down: every Security-screen row fell back to
+     "Unavailable", and `DefaultIntegrityAnalyzer` went on to report "Root access: no indicators
+     found" from an empty list it never collected. The guard is now `SDK_INT >= 30`, the calls sit
+     inside it (lint's flow analysis follows the call site, not a null-checked handle), and the two
+     local `AUTH_STRONG`/`AUTH_WEAK` masks are replaced by `BiometricManager.Authenticators.*`, which
+     is what the WrongConstant finding asked for (the values were already identical). **Proven, not
+     argued:** `SecurityCollectorBiometricApiLevelTest` fails with
+     `NoSuchMethodError: 'int android.hardware.biometrics.BiometricManager.canAuthenticate(int)'` at
+     `SecurityCollector.kt:209` against the old code and passes against the new one; the API-34 case
+     pins that the call is reachable where it exists. It uses sdk 34 rather than 30 so the suite does
+     not build an extra Robolectric sandbox.
+  2. **`USE_BIOMETRIC` was never declared**, which is what the two `MissingPermission` errors said:
+     the app calls `BiometricManager.canAuthenticate`, whose contract requires it. It is a normal
+     permission — granted at install, no prompt, no new screen or copy — so it is now in the manifest
+     with a comment saying why. This is the root fix rather than a suppression.
+  3. **`IdentityCollector.readSerial` tested `SDK_INT >= 26` with `minSdk` 26**, so the branch was
+     always true and the deprecated `Build.SERIAL` fallback behind it was unreachable
+     (`ObsoleteSdkInt`). The dead branch is gone; the call and its `SecurityException` handling are
+     unchanged, so every supported level reads exactly what it read before.
+  4. **`MainActivity` repeated the application label verbatim** (`RedundantLabel`). The attribute is
+     removed; the launcher and recents card resolve to the same `@string/app_name` either way.
+
+  *Noise suppressed with a written reason* (all in the new `app/lint.xml`, each entry carrying why,
+  plus two site-level `@SuppressLint` annotations where an issue-level ignore would have been too
+  broad): `PrivateApi` (`SystemProperties`, `PowerProfile` — both already try/catch-guarded),
+  `QueryPermissionsNeeded` (`getInstalledPackages`; the row already says the count is a lower bound,
+  and `QUERY_ALL_PACKAGES` is a Play-policy problem, not a fix), `InlinedApi` (compile-time constants
+  that are present and safe on every level), `GradleDependency` (dependency upgrades are I10's job, not
+  a mid-campaign change with no device to re-test on), `MissingPermission` on `adapter.name` (already
+  inside `attempt {}`, which turns the refusal into the row's "Unreadable" note) and
+  `HardwareIds`/`MissingPermission` on `Build.getSerial()` (the serial is this app's subject and is
+  redacted by default). Four findings live under `ui/` or `res/` (`ModifierParameter`,
+  `AutoboxingStateCreation` ×2, `MonochromeLauncherIcon`, `ObsoleteSdkInt` in `MiscTestScreen`) and
+  are ignored by path with the reason that the UI freeze forbids touching them — they are deferred to
+  the design pass, not declared acceptable.
+
+  *Verification:* `assembleDebug` green. `testDebugUnitTest` green — **474 tests, 69 classes, 0
+  failures, 0 skipped** (472 before, plus the two new cases). `tools/check-no-ui-change.sh` reports
+  `OK — nothing under ui/ or res/ differs from HEAD`. No screen, control, style, spacing, colour,
+  layout or user-visible copy changed; the only reported values that move are on API 29, where the
+  security rows previously did not exist at all because the stage had failed.
+  *Not verified:* the confirmation re-run of `lintDebug` after these edits did not complete inside a
+  300 s call — `lintAnalyzeDebug` has to redo its whole analysis once the main sources change, and on
+  this two-core host it does not fit again (three attempts). Each of the six errors is addressed by
+  construction (the exact constant lint asked for, the call inside the level check, the permission
+  declared, the dead branch removed, the redundant attribute removed, two reasoned suppressions), but
+  "zero findings" is unconfirmed; re-run `gradle :app:lintDebug` on a host with more cores to confirm.
+  *Environment note for the next run:* the unit suite only fits inside one 300 s call here with
+  `-Drobolectric.usePreinstrumentedJars=true` on the test JVM (set from an init script, not from the
+  tree) — without it every Robolectric class re-instruments the framework classes and the suite stops
+  finishing. With it the whole suite ran in 4m46s.
 
 - [x] **F4. Turn on `allWarningsAsErrors` for the `core` and `domain` packages only** if it is clean
   enough to be sustainable. *Not applicable as scoped:* kotlinc has no per-package or per-source-set
@@ -3565,3 +3634,35 @@ If fewer than ten unchecked items remain, do not lower the bar and do not invent
    the first one in the same run.
 3. Never add an item that requires a visible change. Those belong to a future design pass, not to this
    one.
+
+---
+
+## ZZ. Audit findings — 16 November run
+
+The unchecked items were taken in file order and each was skipped for the reason it already records:
+**F1** (R8) is sandbox-bound and was passed over with today's evidence above; **H2, H5, H7, H9, H11,
+H13, H14, I8, M2, M3, M4** would change what the user reads on screen or in the exported report;
+**L2, P2, V2, MM2, MM3, YY1** move a reported value or verdict and need sign-off; **I10** duplicates
+F5. **F3** was open, doable, and is done above.
+
+Re-reading the code behind the lint findings then produced one further finding, which is recorded
+here rather than fixed: it moves a verdict the user reads, so it is a sign-off item like L2, P2 and
+MM2, not a drive-by edit under the freeze.
+
+- [ ] **ZZ1. A security stage that never ran is reported as a passed root check.**
+  `AndroidDeviceInformationProvider.collect` substitutes `fallbackSecurity()` when the security stage
+  fails or times out, and that fallback carries `rootIndicators = emptyList()`, `debuggable = false`
+  and `verifiedBootState = null`. `DefaultIntegrityAnalyzer` reads the first of those as
+  `security.rootIndicators.isEmpty()` → **PASS**, with the explanation "No common root indicators were
+  found" — a verified-looking statement about evidence that was never collected — and the
+  aggregate integrity verdict and the score move with it. This is the defect class H3 fixed for the
+  battery ("a missing value is not a healthy pack") and that `StageTimer`'s own contract names, left
+  open on the security facts. The API-29 bug fixed in F3 above is one of the ways a device reached
+  this state on every scan, which is why it is worth recording now: the crash is gone, but a *timed
+  out* security stage (the 20 s stage deadline, a wedged property service) still reports PASS.
+  *Change:* carry "the stage did not run" in `SecurityFacts` (a `collected: Boolean`, or make
+  `rootIndicators` nullable) and have the analyzer report UNVERIFIED — dropping the input and lowering
+  coverage — when it is absent, exactly as H3 and the score engine's rule 1 already do. *Needs
+  sign-off:* on such a device the "Root access" check moves from PASS to UNVERIFIED, and the
+  integrity headline, the risk level and the score with it. The current behaviour is not pinned by a
+  test, so the fix needs a fixture for the fallback facts as well.

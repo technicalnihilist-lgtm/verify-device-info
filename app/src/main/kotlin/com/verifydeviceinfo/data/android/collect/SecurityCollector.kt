@@ -203,11 +203,27 @@ class SecurityCollector(
         )
 
         // ---- Biometrics ----
-        val biometricManager = if (Build.VERSION.SDK_INT >= 29) {
-            context.getSystemService(BiometricManager::class.java)
-        } else null
-        val strongResult = biometricManager?.canAuthenticate(AUTH_STRONG) ?: -1
-        val anyResult = biometricManager?.canAuthenticate(AUTH_WEAK) ?: -1
+        // The guard is API 30, not 29: `BiometricManager` exists from 29, but `canAuthenticate(int)`
+        // was added in 30. On Android 10 the call therefore reached a method the platform does not
+        // have, raised NoSuchMethodError, and took the whole security stage with it — every row on
+        // the Security screen fell back to "Unavailable" and the integrity report scored a root
+        // check it never ran. Lint's NewApi check reports the same requirement (api 30).
+        // The calls sit inside the version check rather than behind a null-checked handle: lint
+        // tracks the API level of a call site, not the range of values a `val` can hold, so the
+        // previous shape left the NewApi finding in place even once the guard was right.
+        val strongResult: Int
+        val anyResult: Int
+        if (Build.VERSION.SDK_INT >= 30) {
+            val biometricManager = context.getSystemService(BiometricManager::class.java)
+            strongResult = biometricManager
+                ?.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ?: -1
+            anyResult = biometricManager
+                ?.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) ?: -1
+        } else {
+            // Android 10 and below: nothing was asked, so nothing may be claimed.
+            strongResult = -1
+            anyResult = -1
+        }
         val biometricStrong = strongResult == BiometricManager.BIOMETRIC_SUCCESS
         val biometricAny = anyResult == BiometricManager.BIOMETRIC_SUCCESS ||
             strongResult == BiometricManager.BIOMETRIC_SUCCESS
@@ -319,10 +335,6 @@ class SecurityCollector(
     }
 
     private companion object {
-        // Documented authenticator bit masks; identical on API 29 and 30+.
-        const val AUTH_STRONG = 0x000F
-        const val AUTH_WEAK = 0x00FF
-
         /** The one alias this app ever creates, and always deletes again. */
         const val PROBE_ALIAS = "verify_device_info_probe"
     }

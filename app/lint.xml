@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lint configuration for the 1-20 November optimisation campaign (backlog item F3).
+
+  Every entry below is a finding that was read, judged, and deliberately left as it is, with the
+  reason written next to it. Nothing here is a blanket "make the report green": an issue id is
+  listed only when *every* instance of it in this module was examined. `abortOnError` stays false
+  in app/build.gradle.kts, so a new finding of any other type still shows up in the report.
+-->
+<lint>
+
+    <!-- ==========================================================================
+         Findings that cannot be fixed during this campaign: they live under `ui/` or `res/`, and
+         the campaign's hard rule is that no file that draws anything may differ. Each is a real,
+         cosmetic-or-layout observation, deferred to the design pass that follows it.
+         ========================================================================== -->
+
+    <!-- `Common.kt` declares a `Modifier` parameter that is not the first optional parameter. -->
+    <issue id="ModifierParameter">
+        <ignore path="src/main/kotlin/com/verifydeviceinfo/ui/components/Common.kt" />
+    </issue>
+
+    <!-- `mutableStateOf(0f)` / `mutableStateOf(0)` box their initial value. The fix is
+         `mutableFloatStateOf` / `mutableIntStateOf`, which are a source change in a screen. -->
+    <issue id="AutoboxingStateCreation">
+        <ignore path="src/main/kotlin/com/verifydeviceinfo/ui/screens/tests/DisplayTestScreen.kt" />
+        <ignore path="src/main/kotlin/com/verifydeviceinfo/ui/screens/tests/SensorTestScreen.kt" />
+    </issue>
+
+    <!-- A version check that `minSdk` makes constant, in a test screen. The screen is a UI file. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/kotlin/com/verifydeviceinfo/ui/screens/tests/MiscTestScreen.kt" />
+    </issue>
+
+    <!-- The adaptive launcher icon has no monochrome layer for themed icons. That is a drawable. -->
+    <issue id="MonochromeLauncherIcon">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+
+    <!-- ==========================================================================
+         Deliberate behaviour, verified against the code, that the report would otherwise keep
+         flagging on every run.
+         ========================================================================== -->
+
+    <!-- `android.os.SystemProperties` (SystemPropertyReader) and
+         `com.android.internal.os.PowerProfile` (BatteryCollector) are read through reflection, on
+         purpose: they are the only source for the `getprop` dump and the design capacity, both
+         reads are wrapped in try/catch and degrade to "Unavailable", and neither is a hidden API
+         the app depends on for correctness. -->
+    <issue id="PrivateApi">
+        <ignore path="src/main/kotlin/com/verifydeviceinfo/data/android/SystemPropertyReader.kt" />
+        <ignore path="src/main/kotlin/com/verifydeviceinfo/data/android/collect/BatteryCollector.kt" />
+    </issue>
+
+    <!-- `getInstalledPackages(0)` under Android 11+ visibility rules. The app reports the count it
+         can see and says so in the row's own note ("This count is therefore a lower bound");
+         declaring QUERY_ALL_PACKAGES to see more would be a Play policy problem for a device-info
+         app, and would change what the app is allowed to do rather than what it reports. -->
+    <issue id="QueryPermissionsNeeded">
+        <ignore path="src/main/kotlin/com/verifydeviceinfo/data/android/collect/SoftwareCollector.kt" />
+    </issue>
+
+    <!-- Compile-time constants (`FEATURE_STRONGBOX_KEYSTORE`, `BIOMETRIC_SUCCESS`, and the
+         authenticator masks) that the compiler inlines. The value is present on every API level
+         and the calls that use them are guarded or safe when the feature is absent, so there is no
+         runtime crash to prevent — this is exactly the case the check's own documentation says may
+         be suppressed. -->
+    <issue id="InlinedApi" severity="ignore" />
+
+    <!-- Newer versions of the Compose BOM, Kotlin plugins, Robolectric and the AndroidX libraries
+         exist. Upgrading any of them changes the verified dependency set of a campaign that has no
+         device to re-test on, so it is tracked as its own task (backlog item I10) rather than
+         applied mid-campaign. The finding is reported by that item, not by every lint run. -->
+    <issue id="GradleDependency" severity="ignore" />
+
+</lint>

@@ -1,5 +1,6 @@
 package com.verifydeviceinfo.data.android.collect
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -85,8 +86,14 @@ class ConnectivityCollector(private val context: Context) {
                         "BluetoothAdapter.isEnabled",
                         note = "Requires the Nearby devices permission on Android 12 and newer.")
                 }
+                // `getName()` needs BLUETOOTH_CONNECT from Android 12. It is read inside
+                // `attempt`, which turns a refusal into a Reading that the row reports as
+                // "Unreadable", so there is nothing for lint's MissingPermission check to guard
+                // against: the SecurityException is the outcome this code is written for.
+                @SuppressLint("MissingPermission")
+                val adapterName = attempt { adapter.name }.value
                 fields += FieldBuilder.value("net.bluetoothName", "Bluetooth adapter name",
-                    attempt { adapter.name }.value,
+                    adapterName,
                     SpecGroup.CONNECTIVITY, "BluetoothAdapter.getName()", Confidence.MEDIUM,
                     sensitive = true)
             }

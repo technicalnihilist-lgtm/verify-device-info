@@ -1,5 +1,6 @@
 package com.verifydeviceinfo.data.android.collect
 
+import android.annotation.SuppressLint
 import android.os.Build
 import com.verifydeviceinfo.core.model.Confidence
 import com.verifydeviceinfo.core.model.DeviceIdentity
@@ -181,8 +182,19 @@ class IdentityCollector(private val props: SystemPropertyReader) {
         return IdentityResult(identity, fields, softwareFields)
     }
 
+    /**
+     * The device serial, or null when the platform withholds it.
+     *
+     * `minSdk` is 26, so `Build.getSerial()` (API 26) is the only branch there ever was: the
+     * `SDK_INT >= 26` test around it was always true and the deprecated `Build.SERIAL` fallback
+     * behind it was unreachable code that lint reported as an obsolete SDK check. Reading it needs
+     * `READ_PHONE_STATE` on most builds, so the call is expected to throw — `SecurityException` is
+     * the answer "not available to an ordinary app", not a failure. Reading an identifier is what
+     * this app is for, and the value is redacted by default in every export.
+     */
+    @SuppressLint("HardwareIds", "MissingPermission")
     private fun readSerial(): String? = try {
-        if (Build.VERSION.SDK_INT >= 26) Build.getSerial() else @Suppress("DEPRECATION") Build.SERIAL
+        Build.getSerial()
     } catch (security: SecurityException) {
         null
     } catch (other: Throwable) {
