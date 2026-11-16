@@ -3721,3 +3721,43 @@ what the standing brief forbids.
   that mirror. No build file, repository list or dependency changed, and the mirror serves the same
   bytes Maven Central does. A run that sees `MavenArtifactFetcher` or a 502 on
   `nativeruntime-dist-compat` should reach for this first rather than suspecting the tests.
+
+## BBB. 17 November run
+
+The eighteen items still open were taken in file order and re-read rather than re-litigated.
+**F1** (R8) is sandbox-bound and was passed over with this pass's evidence below: `nproc` = 2,
+`free` = 2,098 MB, a cold `assembleDebug` alone needed four 300 s calls (about 19 minutes), and
+`minifyReleaseWithR8` is still non-resumable, so no minified APK can be produced or measured here.
+**H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** would change what the user reads on screen or in the
+exported document; **L2, P2, V2, MM2, MM3, YY1, ZZ1** move a reported value or verdict and need
+sign-off, which this freeze cannot give itself.
+
+No new finding cleared the bar. Re-read this pass, for the defect classes the sections above record
+(work repeated per call, work on the UI thread, an error path that invents a value, a resource left
+open, an unbounded wait): `Formatters` and `ReportJson`, the PDF write path and page writer in
+`PdfReportGenerator`, `FileDiagnosticHistory` (`save`, `clear`, `pruneReports`, `atomicWriteText`),
+`AppViewModel`'s state plumbing, `ScanCoordinator` / `LatestRequest` / `WeakRefHolder` /
+`StageTimer`, `AppContainer`, `AssetReferenceRepository` / `ReferenceIndex`, and the transport,
+telephony and location rows of `ConnectivityCollector`. Each already carries the fix its own history
+records, and the two real defects that remain in this code (`Formatters.duration`'s double-counted
+days and the unencrypted-volume VERIFIED, MM2 and P2) are reported-value changes waiting on sign-off,
+not oversights.
+
+**Nothing was implemented and no production or test file changed.** This pass commits this note
+only. That is the honest outcome for a list whose every remaining entry is blocked, and inventing a
+cosmetic change to fill the run is exactly what the standing brief forbids.
+
+### Build and test state on this host, 17 November (no repository file changed for any of it)
+
+* `assembleDebug` green: cold build in four calls (about 19 minutes, 1.0 GB of Gradle cache), warm
+  relink 3m15s. APK 9,844,412 bytes.
+* `testDebugUnitTest` green: **474 tests, 0 failures, 0 skipped**, 3m45s once warm.
+* The `org.robolectric:nativeruntime-dist-compat:1.0.16` 502 the 16 November pass recorded is still
+  there — `repo.maven.apache.org` and `repo1.maven.org` both answer 502, while
+  `maven-central.storage-download.googleapis.com` serves the 158 MB jar. **New this pass:** appending
+  the mirror is not enough, because Maven Central is resolved first and its 502 wins; the mirror has
+  to come *before* it, and `RepositoriesMode.FAIL_ON_PROJECT_REPOS` means the only place it can be
+  added is `dependencyResolutionManagement.repositories` in an init script —
+  `repositories.clear()`, then `google()`, then the mirror, then `mavenCentral()`, with
+  `robolectric.dependency.repo.url` set to the same mirror on every `Test` task. That is what makes
+  the suite start here. No build file, repository list or dependency was changed for it.
