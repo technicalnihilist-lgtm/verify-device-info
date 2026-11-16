@@ -508,6 +508,11 @@ build and tests green before committing.
   R8 run needs the whole release input chain built first (`:app:compileReleaseKotlin` and its
   dependency graph, several calls on this host) before the non-resumable `minifyReleaseWithR8` even
   starts. Nothing about that changed today.
+  *Passed over (16 Nov, second pass):* unchanged — `nproc` = 2, `free` = 2,098 MB. This pass's cold
+  `assembleDebug` again needed five 300 s calls before it linked (a sixth finished the link in
+  1m13s), and `minifyReleaseWithR8` still cannot finish inside one 300 s call or resume across
+  calls, so there is no minified APK to produce, measure or check here. See the ZZ section for this
+  pass's build-environment findings.
 
 - [x] **F2. Fix all compiler warnings.** Deprecated `Icons.Filled.ArrowBack`/`List` → AutoMirrored
   equivalents (visually identical), deprecated `createCaptureSession` → the `SessionConfiguration`
@@ -988,7 +993,13 @@ would be worse than one honest one.
   Actions, so the checkout/cache/upload steps and the runner's own limits are unexercised. Build and
   tests green locally: `assembleDebug` succeeded, `testDebugUnitTest` passed all 233 tests, APK
   unchanged at 9,811,608 bytes, `tools/check-no-ui-change.sh` clean (no `ui/` or `res/` file touched).
-- [ ] **I8. Lint triage.** Run `gradle lint`, fix real findings, suppress the rest with a written reason.
+- [x] **I8. Lint triage.** Run `gradle lint`, fix real findings, suppress the rest with a written reason.
+  *Done (16 Nov, second pass) — covered by F3:* this item asks for exactly what F3 ran today. The
+  complete report (6 errors, 13 warnings, 13 issue types) was triaged issue by issue; the real
+  defects were fixed (`SecurityCollector`'s API-30 biometric call behind an API-29 guard, the
+  missing `USE_BIOMETRIC` declaration), and every remaining finding is either fixed or suppressed in
+  `app/lint.xml` with its reason written beside it. Nothing was left untriaged, so there is nothing
+  this item can add; ticked as covered rather than re-run.
   *Passed over (7 Nov run):* unchanged — same constraint as F3: `lintAnalyzeDebug` does not finish
   in one 300 s call on 2 cores.
   *Passed over (8 Nov run):* unchanged — same constraint as F3.
@@ -1002,8 +1013,13 @@ would be worse than one honest one.
   an empty frame and asserts the check rejects it — so the seven screen assertions cannot pass for a
   reason unrelated to the screen having been drawn. Recorded in the E-section entry above; the
   checkbox was simply never ticked.
-- [ ] **I10. Dependency audit.** Record the resolved dependency tree and flag anything unexpectedly
+- [x] **I10. Dependency audit.** Record the resolved dependency tree and flag anything unexpectedly
   large.
+  *Done (F5) — duplicate:* the release runtime classpath was resolved and audited under F5 (149
+  modules, every top-level entry mapped to a declared dependency) and re-measured on 10 Nov; a
+  second recorded tree would be the same tree. The dependency-*upgrade* decision that `app/lint.xml`
+  points here for is a separate call (no device is available to re-test an upgrade), not what this
+  item asks.
   *Passed over (7 Nov run):* F5 already resolved and audited the release classpath (149 modules,
   every top-level entry mapped to a declared dependency), so a second recorded tree would only
   duplicate it. Re-scope as per-artefact byte sizes if that is what is wanted.
@@ -3666,3 +3682,42 @@ MM2, not a drive-by edit under the freeze.
   sign-off:* on such a device the "Root access" check moves from PASS to UNVERIFIED, and the
   integrity headline, the risk level and the score with it. The current behaviour is not pinned by a
   test, so the fix needs a fixture for the fallback facts as well.
+
+## AAA. Second pass — 16 November
+
+The twenty items left open were taken in file order and each was re-read rather than re-litigated.
+**F1** (R8) is sandbox-bound and was passed over with this pass's evidence above; **I8** is the work
+F3 completed this morning and **I10** is the audit F5 recorded, so both are now ticked as covered
+instead of being passed over for a sixth time; **H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** would
+change what the user reads on screen or in the exported document; **L2, P2, V2, MM2, MM3, YY1, ZZ1**
+move a reported value or verdict and need sign-off, which this freeze cannot give itself.
+
+No new finding cleared the bar. The scan path (`AndroidDeviceInformationProvider`'s concurrent stage
+fan-out and its fallbacks, `StageTimer`, `ScanCoordinator`), the two export paths (`toPdf` and
+`toJsonFile` both already hop off the main thread) and `Formatters` were re-read for the defect
+classes the sections above record — work repeated per call, work on the UI thread, an error path that
+silently invents a value, a resource left open — and none of them holds one that is left.
+
+**Nothing was implemented and no production or test file changed.** This pass commits backlog state
+only: the two ticks above and the environment notes below. That is the honest outcome for a list
+whose every remaining entry is blocked, and inventing a cosmetic change to fill the run is exactly
+what the standing brief forbids.
+
+### Build environment, for the next run (no repository file changed for any of it)
+
+* `JAVA_TOOL_OPTIONS` must be unset (the image exports a 64 MB class-space ceiling that starves D8 and
+  the Kotlin compiler), and the build wants
+  `-Dorg.gradle.jvmargs="-Xmx1400m -XX:MaxMetaspaceSize=512m -XX:TieredStopAtLevel=1 -XX:+UseSerialGC"`.
+  With those, this pass's warm `assembleDebug` linked in **1m13s** and the full suite ran green in
+  **3m46s**.
+* **New this pass:** the unit-test suite cannot start at all on this host, and the cause is the proxy,
+  not the code. `repo.maven.apache.org` answers **502** for
+  `org.robolectric:nativeruntime-dist-compat:1.0.16` (it failed the dependency resolution and then
+  the configuration-cache serialisation), and Robolectric's own runtime fetch
+  (`MavenArtifactFetcher`) fails against the same host with an `IOException`. Both were unblocked
+  with a sandbox-only Gradle init script — not in the tree — that prepends
+  `https://maven-central.storage-download.googleapis.com/maven2/` for the `org.robolectric` group
+  and sets `robolectric.dependency.repo.id`/`robolectric.dependency.repo.url` on every `Test` task to
+  that mirror. No build file, repository list or dependency changed, and the mirror serves the same
+  bytes Maven Central does. A run that sees `MavenArtifactFetcher` or a 502 on
+  `nativeruntime-dist-compat` should reach for this first rather than suspecting the tests.
