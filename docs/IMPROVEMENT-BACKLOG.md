@@ -3761,3 +3761,60 @@ cosmetic change to fill the run is exactly what the standing brief forbids.
   `repositories.clear()`, then `google()`, then the mirror, then `mavenCentral()`, with
   `robolectric.dependency.repo.url` set to the same mirror on every `Test` task. That is what makes
   the suite start here. No build file, repository list or dependency was changed for it.
+
+## CCC. Third pass — 17 November
+
+The eighteen items open above were taken in file order and each was re-read against the code rather
+than re-litigated. **F1** (R8) was retried rather than assumed, with two new facts recorded below.
+**H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** still change what the user reads on screen or in the
+exported document, and **L2, P2, V2, MM2, MM3, YY1, ZZ1** still move a reported value or verdict and
+need sign-off this freeze cannot give itself. Each was re-confirmed in the source this pass, not
+copied forward: `M2` still declares `total = 8` over seven `stage(...)` calls in
+`AndroidDeviceInformationProvider.collect`; `M4`'s `finishPage` still leaves the small paint at
+7.5 pt; `P2`'s `encryptionState.contains("encrypted", true)` still passes `unencrypted`; `MM2`'s
+`Formatters.duration` still takes `remainingDays = days % 30`; `YY1`'s `FileDiagnosticHistory.save`
+still adds the index entry outside the document write; `H7`'s transport list still carries VPN as
+one more transport with no underlying one; `H14` is still data the recorded `sourceUrl` pages do not
+carry.
+
+### F1, retried (16 November's conclusion was not taken on trust)
+
+The release input chain was built from cold on this host (`nproc` = 2, `free` = 2,098 MB): the
+dependency cache is 899 MB, `:app:compileReleaseKotlin` needed three 300 s calls (the third finished
+in 2m23s), and every remaining release input task was then brought UP-TO-DATE so that a later call
+went straight into R8 with a full window and a reused configuration cache. Three R8 runs followed:
+
+* `-Xmx1700m`, `-XX:MaxMetaspaceSize=384m`, default tiered JIT, inputs half warm: killed at the call
+  limit with `outputs/mapping/release/` empty.
+* the same, with every input UP-TO-DATE and G1 replaced by ParallelGC: **R8 got further than any
+  earlier attempt on record** — it completed the shrink phase and wrote `seeds.txt` (109,913 B) and
+  `usage.txt` (2,129,920 B) — and was then killed inside dexing.
+* `-dontoptimize` appended to `proguard-rules.pro` (shrink and obfuscate only, the configuration
+  AGP's own non-optimising template uses), inputs warm: identical outcome — shrink complete
+  (`seeds.txt` 110,264 B, `usage.txt` 2,129,920 B), killed inside dexing.
+
+So the blocker is now located precisely: it is not the optimizer and not the input chain, it is
+R8's dexing of the Compose-dominated program classpath on two cores, which does not fit in the
+~280 s a single call leaves after Gradle's own start-up, and which restarts from zero when the call
+is killed. No minified APK exists to measure, so there is still no "after" to compare with the
+recorded **6,570,591-byte** unminified baseline, and the release path is untouched —
+`app/build.gradle.kts` and `app/proguard-rules.pro` are back at `HEAD`. This needs a host where one
+Gradle invocation can run longer than 300 s; a seventh retry here would produce the same three logs.
+
+### Sub-threshold observations (recorded, not queued)
+
+Not added as items, because each is once-per-scan work with no measured consequence, and the brief
+forbids padding the list with cosmetic entries:
+
+* `IdentityCollector` still builds a `SimpleDateFormat("dd MMM yyyy HH:mm")` per call for the
+  firmware build date, the one instance left of the pattern `Formatters`' own KDoc records as fixed
+  (one format, calendar and locale data per call, ~2 KB). It runs once per scan, not per row.
+* `SystemPropertyReader.get` re-enters the `@Synchronized` `loadDump` on every property read, so the
+  concurrent stages serialise on that monitor after the dump is loaded. Uncontended, ~60-100 reads
+  per scan.
+* The remaining per-call `String.format` sites in the collectors and in `DefaultAuthenticityEngine`
+  are once per scan each (a handful per camera and per sensor); A2's win came from the sites that
+  ran per row.
+
+**Nothing was implemented and no production or test file changed.** The tree this pass leaves behind
+differs from `HEAD` in this section only.
