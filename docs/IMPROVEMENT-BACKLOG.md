@@ -3818,3 +3818,86 @@ forbids padding the list with cosmetic entries:
 
 **Nothing was implemented and no production or test file changed.** The tree this pass leaves behind
 differs from `HEAD` in this section only.
+
+## DDD. 18 November run
+
+The eighteen items open above were taken in file order and each was re-read in the source rather
+than re-litigated. **F1** (R8) is sandbox-bound: `nproc` = 2, `free` = 2,098 MB, and `minifyReleaseWithR8`
+is still non-resumable — see the operational note at the end of this section, which is the one thing
+this pass learned about it. **H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** would change what the user
+reads on screen or in the exported document. **L2, P2, V2, MM2, MM3, YY1, ZZ1** move a reported value
+or verdict and need sign-off this freeze cannot give itself.
+
+Each was re-confirmed in the source this pass, not copied forward: `M2` still declares `total = 8`
+over seven `stage(...)` calls in `AndroidDeviceInformationProvider.collect`; `M3`'s Display-and-sensors
+input still counts `hardware.sensors.size` (line 353) where Hardware health counts
+`logicalSensorCount` (line 104); `M4`'s `finishPage` still sets `smallPaint.textSize = 7.5f`
+(`PdfReportGenerator`, line 266); `P2` still judges the volume with
+`security.encryptionState.contains("encrypted", true)` (`DefaultIntegrityAnalyzer`, line 189), which
+`unencrypted` satisfies; `ZZ1` still reads an empty `rootIndicators` list as a PASS (line 25) while
+`fallbackSecurity()` supplies exactly that; `L2` still derives `fpProduct`/`fpDevice` (lines 92-93)
+and compares only `fpBrand` (line 94); `MM2`'s `Formatters.duration` still takes
+`remainingDays = days % 30`; `YY1`'s `FileDiagnosticHistory.save` still adds the index entry outside
+the document write's `try`; `V2`'s `recordResult` and `setPurchaseDate` still call `rebuildReport`
+directly (lines 197, 211).
+
+### Re-read this pass, with nothing found
+
+The defect classes these sections record — work repeated per call, work on the UI thread, an error
+path that invents a value, a resource left open, an unbounded wait, a write that is not crash-safe —
+were walked again over the paths a user actually waits on:
+
+* **The history path.** `FileDiagnosticHistory.save`, `list`, `loadRaw` and `clear` all already open
+  with `withContext(Dispatchers.IO)`, so `AppViewModel.scan`'s `history.save` and the screen's
+  `list`/`loadRaw` are off the main thread despite being called from a `Main.immediate` scope. The
+  writes are atomic (O1, M5, XX1) and the index write is best-effort (T1). Nothing left here.
+* **The diagnostics path.** `AndroidHardwareDiagnosticsEngine.runAutomatedChecks` opens with
+  `withContext(Dispatchers.IO)`, so the 1.5 s accelerometer liveness probe and the battery
+  `registerReceiver` do not run in the click; each check is isolated by `automatedCheck` (including
+  `LinkageError`). Nothing left here.
+* **The scan fan-out.** `StageTimer` bounds each stage and the whole scan, abandons a stage blocked
+  in a Java call instead of waiting for it, and distinguishes caller cancellation from a stage's own
+  `CancellationException`; `SystemPropertyReader.readProcessDump` bounds both the read and the reap.
+  Nothing left here.
+* `ReferenceIndex`, `AnalysisSupport`, `Formatters`, `CpuFrequency` and `FileDiagnosticHistory` all
+  hoist their patterns, formatters and name matchers; no per-row `String.format`, `Regex` or
+  `SimpleDateFormat` construction is left on a path that runs per row.
+
+### Sub-threshold observation, now measured and closed
+
+The 17 November pass recorded, without queuing it, that `SystemPropertyReader.get` re-enters the
+`@Synchronized` `loadDump` on every read, so the ten concurrent stages serialise on that monitor
+after the dump is loaded. Measured this pass rather than left as an impression: a JVM harness with
+the reader's exact hot path, ten threads (the scan's stage fan-out) reading 900-key properties after
+the dump is loaded, best of five rounds — **64 ns per read with the monitor taken on every call
+against 47 ns with a volatile fast path, 1.36x**. A scan makes about a thousand property reads, so
+the whole contention is **~17 microseconds of a scan that takes seconds** — 0.001%. Below the bar for
+a production change under this freeze, and now closed as such instead of being re-opened by the next
+pass. The measurement harness is not committed: it is a scratch benchmark, not a test.
+
+### F1: the earlier attempts were competing with orphaned daemons
+
+Not a retry — an operational finding worth recording before the next one. `org.gradle.daemon=false`
+means a build killed at the 300 s call limit leaves its single-use daemon **alive and still working**;
+this pass found two of them at 65% and 20% CPU on a two-core box, from calls that had already been
+killed, and `:app:mergeExtDexDebug` — recorded above as taking 3m37s to 4m08s and never finishing in
+a call — completed **inside one call** once they were killed (`pkill -9 -f GradleDaemon`). So the
+"a killed task restarts from zero" conclusion in the 5 and 6 November notes holds for the *task*, but
+the host was also being starved by the previous attempt's own daemon, which no earlier note accounts
+for. The next F1 attempt should start from a quiet host: kill any surviving daemons first, then build
+the release input chain and let R8 have the whole window.
+
+### Build and test state on this host, 18 November (no repository file changed for any of it)
+
+* `assembleDebug` green: cold build in five calls (about 25 minutes, 911 MB of Gradle cache); APK
+  **9,844,412 bytes**, byte-identical to the 17 November build, as expected for an unchanged tree.
+* `testDebugUnitTest` green: **474 tests, 0 failures, 0 errors, 0 skipped**, 3m54s once warm.
+* The `org.robolectric:nativeruntime-dist-compat` 502 on Maven Central is still there and still needs
+  the Google mirror listed *before* `mavenCentral()` from an init script, plus
+  `robolectric.dependency.repo.url` on every `Test` task. No build file, repository list or dependency
+  was changed for it.
+
+**Nothing was implemented and no production or test file changed.** The tree this pass leaves behind
+differs from `HEAD` in this section only. That is the honest outcome for a list whose every remaining
+entry is blocked, and inventing a cosmetic change to fill the run is exactly what the standing brief
+forbids.
