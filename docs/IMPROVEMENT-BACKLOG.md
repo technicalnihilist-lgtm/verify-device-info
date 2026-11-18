@@ -3952,3 +3952,31 @@ null check on the line above. No `toUpperCase()`/`toLowerCase()` without a `Loca
 **Nothing was implemented and no production or test file changed.** The tree this pass leaves behind
 differs from `HEAD` in this section only, and `assembleDebug` (9,844,412 bytes) and
 `testDebugUnitTest` (474 tests, 0 failures, 0 skipped) are green on it.
+
+## FFF. Third pass — 18 November
+
+The eighteen unchecked items were taken in file order, and the sites the two earlier passes of today
+rested on were re-read in the source rather than copied forward: `AndroidDeviceInformationProvider`
+line 69 still declares `total = 8` over seven `stage(...)` calls (M2); `DefaultIntegrityAnalyzer` still
+reads `security.rootIndicators.isEmpty()` as PASS (ZZ1) and still judges the volume with
+`security.encryptionState.contains("encrypted", true)`, which `unencrypted` satisfies (P2);
+`PdfReportGenerator.finishPage` still assigns `smallPaint.textSize = 7.5f` and never restores it (M4);
+`DefaultScoreEngine` line 353 still scores the Display-and-sensors section on `hardware.sensors.size`
+where line 104 uses `logicalSensorCount` (M3); `Formatters.duration` still takes
+`remainingDays = days % 30` (MM2); `AppViewModel.recordResult` and `setPurchaseDate` still call
+`rebuildReport` on the caller's thread (V2).
+
+**F1** (R8) was not retried. The second pass of today closed its last three hypotheses — quiet host,
+code cache, daemon survival — with measurements from this same 2-core / 2,098 MB host, and
+`minifyReleaseWithR8` needs the shrink phase *and* dexing inside one non-resumable 300 s call. A third
+attempt today would reproduce those logs rather than advance the item; it stays open for a host where
+one Gradle invocation can run longer than 300 s.
+
+**H2, H5, H7, H9, H11, H13, M2, M3, M4** change what the user reads on screen or in the exported
+document; **H14** needs reference data the app does not carry; **L2, P2, V2, MM2, MM3, YY1, ZZ1** move
+a reported value or verdict and need sign-off this freeze cannot give itself.
+
+**Nothing was implemented and no production, test, resource, manifest or Gradle file changed.** No
+build was run, because no compiled input differs from `HEAD` (`d66ecd6`), whose `assembleDebug`
+(9,844,412-byte APK) and `testDebugUnitTest` (474 tests, 0 failures, 0 skipped) were recorded green by
+the 09:02 pass today. The tree this pass leaves behind differs from `HEAD` in this section only.
