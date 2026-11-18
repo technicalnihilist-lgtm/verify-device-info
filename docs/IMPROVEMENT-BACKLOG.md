@@ -3901,3 +3901,54 @@ the release input chain and let R8 have the whole window.
 differs from `HEAD` in this section only. That is the honest outcome for a list whose every remaining
 entry is blocked, and inventing a cosmetic change to fill the run is exactly what the standing brief
 forbids.
+
+## EEE. Second pass — 18 November
+
+The eighteen items open above were taken in file order. **F1** (R8) was attempted again rather than
+assumed, from the quiet host the first pass of today asked for; the rest are blocked for the reasons
+their entries record: **H2, H5, H7, H9, H11, H13, H14, M2, M3, M4** change what the user reads on
+screen or in the exported document, and **L2, P2, V2, MM2, MM3, YY1, ZZ1** move a reported value or
+verdict and need sign-off this freeze cannot give itself.
+
+### F1, attempted from a quiet host: three hypotheses closed
+
+This pass began in an empty sandbox with no surviving daemons (`pgrep -f GradleDaemon` empty,
+2,045 MB of 2,098 free), which is exactly the condition the first pass of today recommended. Cold
+`assembleDebug` was green in five calls at the recorded 9,844,412-byte APK; the release inputs were
+then warmed with `isMinifyEnabled = true` and the keep rules written (a `-keepclassmembers` rule for
+the `(Application)` constructor that `AndroidViewModelFactory` reflects on, and `-dontwarn` for the
+two platform classes looked up by name). Three facts, none of them on record before:
+
+* **A quiet host is not the missing minute.** With no competing daemon, `:app:minifyReleaseWithR8`
+  still completed the shrink phase (`seeds.txt` 110,028 B, `usage.txt` 2,129,920 B) and was killed
+  inside dexing at the 270 s call limit. The shrink phase alone takes about four of those minutes,
+  which is why no arrangement of the remaining window reaches the end of dexing.
+* **The code cache was a plausible but wrong explanation.** `gradle.properties` caps
+  `-XX:ReservedCodeCacheSize` at 96 MB, which would drop a four-minute JVM into the interpreter once
+  C2's code cache fills. Raising it to 256 MB (heap 1300 MB, `-Dorg.gradle.jvmargs=...`) changed
+  nothing measurable: shrink completed, dexing was still cut off.
+* **The daemon does not survive the kill usefully.** The first pass of today found orphaned daemons
+  still working after a killed call, which suggested a killed R8 might finish on its own. Measured
+  directly: the single-use daemon is still at 127% CPU the instant the client dies and exits within
+  ten seconds, abandoning the task. A killed R8 therefore leaves nothing to reuse, and
+  `org.gradle.daemon=false` makes the task non-resumable by design.
+
+`app/build.gradle.kts` and `app/proguard-rules.pro` are back at `HEAD`. No minified APK exists to
+measure against the recorded **6,570,591-byte** unminified baseline, so F1 stays open for a host
+where one Gradle invocation can run longer than 300 s; a sixth attempt here would reproduce these
+logs.
+
+### Re-read this pass, nothing found
+
+The defect classes these sections record — work repeated per call, work on the UI thread, an error
+path that invents a value, a resource left open, an unbounded wait, a locale-sensitive comparison —
+were walked again over `SystemPropertyReader` (dump deadline, retry cap, bounded reap),
+`AudioProbe` / `SensorProbe` (every `MediaRecorder`, `AudioTrack` and `SensorEventListener` has a
+matching release, and both already carry release tests), the two `ACTION_BATTERY_CHANGED` sticky
+receivers, and the sensor test screen's nullable min/max, whose `!!` sites are each guarded by the
+null check on the line above. No `toUpperCase()`/`toLowerCase()` without a `Locale` exists in
+`src/main`, and every `String.format` on a user-visible path passes `Locale.US` or `Locale` data.
+
+**Nothing was implemented and no production or test file changed.** The tree this pass leaves behind
+differs from `HEAD` in this section only, and `assembleDebug` (9,844,412 bytes) and
+`testDebugUnitTest` (474 tests, 0 failures, 0 skipped) are green on it.
