@@ -3980,3 +3980,71 @@ a reported value or verdict and need sign-off this freeze cannot give itself.
 build was run, because no compiled input differs from `HEAD` (`d66ecd6`), whose `assembleDebug`
 (9,844,412-byte APK) and `testDebugUnitTest` (474 tests, 0 failures, 0 skipped) were recorded green by
 the 09:02 pass today. The tree this pass leaves behind differs from `HEAD` in this section only.
+
+## GGG. Fourth pass — 18 November
+
+The eighteen unchecked items were taken in file order and re-read in the source rather than
+re-litigated. Nothing had changed since the third pass of today, and each is blocked for the reason
+its entry already records: **F1** (R8) needs one Gradle invocation that can run longer than 300 s
+(`nproc` = 2, `free` = 2,098 MB; the second pass of today closed its remaining hypotheses with
+measurements from this host), **H2, H5, H7, H9, H11, H13, M2, M3, M4** would change what the user
+reads on screen or in the exported document, **H14** needs reference data the app does not carry, and
+**L2, P2, V2, MM2, MM3, YY1, ZZ1** move a reported value or verdict and need sign-off this freeze
+cannot give itself.
+
+The history path was re-read against the one claim it still rests on — T1's "pruning stays correct
+without further change" after the index write became best-effort — and that claim turned out to be
+false once the store is full. The finding below was implemented in this run.
+
+- [x] **GGG1. A save whose index write failed pruned the report the surviving index still named.**
+  `FileDiagnosticHistory.save` writes the report document, then the index, then prunes report files
+  that fell out of the index. T1 made the index write best-effort and justified the prune with
+  "`kept` is the previous entries plus this one, so it can only be a superset of what the index still
+  on disk points at". That holds only while the store is under its cap: `kept` is
+  `entries.take(MAX_INDEX_ENTRIES)`, so on the save that pushes a fifty-first entry in, `kept` is the
+  *previous* fifty entries minus the oldest, plus the new one — not a superset of `previous`. With the
+  index write failing, the index on disk is still `previous`, which still names the entry that fell
+  off the end, and the prune deleted that entry's document anyway. The History screen builds its list
+  from the index and expands an entry by reading the document its id names, so the result is one row
+  that opens to nothing — and it is permanent for the same reason YY1 records: the next save reads
+  that index and writes the dead entry back verbatim, while `pruneReports` has no file left to remove.
+  A stored report is lost, from the `save` path, in a failure path that T1 documented as safe.
+  *Change:* `save` keeps the index write best-effort and passes the prune the condition it actually
+  needs — `indexReadable = previous != null && indexed`, where `indexed` is `runCatching {
+  writeIndex(kept) }.isSuccess`. A prune now runs only against an index that was really written, so
+  what it deletes is what the index on disk no longer names. When the write failed, nothing is pruned
+  at all, which is also what keeps the document this save just wrote — an orphan with no entry
+  pointing at it, for the next successful save to account for, exactly as T1's third test pins. A
+  completed save prunes precisely what it pruned before; the signature, the entry returned, the JSON
+  written and the order of the three writes are unchanged, and no `ui/` or `res/` file was touched.
+  *Tests:* one new case in `HistoryIndexFailureTest` — fifty saves to fill the index to its cap, the
+  index write then blocked with the existing obstruction, a fifty-first save, and then every id the
+  surviving index still lists must still open. It **fails against `HEAD`** with "java.lang.AssertionError:
+  the report the surviving index still names was pruned" and passes with the change, so it pins the
+  ordering rather than the happy path; the three cases T1 added to the same class still pass, which is
+  what rules out the first shape this fix was tried in (pruning against `previous` instead of not at
+  all), which deleted the newly written document and failed all three.
+  *Verification:* `assembleDebug` green (1m04s warm; APK 9,921,072 bytes — no size claim, the debug
+  APK is not byte-reproducible on this toolchain and no pre-change APK was kept). `testDebugUnitTest`
+  green — **475 tests** (474 before, plus the one above), every test class covered by four filtered
+  invocations, 0 failures, 0 errors, 0 skipped. `tools/check-no-ui-change.sh HEAD` clean (31 files
+  tracked under `ui/` and `res/`, none differs).
+  *Not verified:* no device is available, so the failed index write is simulated by making
+  `history/` read-only rather than by filling the data partition, and the effect is asserted at the
+  store — that the entry still opens — rather than through the History screen.
+
+### Build notes for the next pass on this host
+
+Two things cost this run most of its time and are worth recording.
+
+* `:app:compileDebugKotlin` did not finish inside a 285 s window at the committed
+  `org.gradle.jvmargs` (`-Xmx1400m`, G1, parallel GC) — it restarted from zero on every call, five
+  times. With `-Dorg.gradle.jvmargs="-Xmx1600m -XX:MaxMetaspaceSize=384m -XX:+UseSerialGC
+  -XX:TieredStopAtLevel=1"` the same task completes in **2m36s** on the first attempt, and every
+  later build reuses it. Nothing in the repository was changed for this; it is a command-line flag.
+* `org.robolectric:nativeruntime-dist-compat:1.0.16` still answers 502 through the proxy's
+  `repo.maven.apache.org` → `gcp.mirrors.maven.org` redirect, as the second pass of today recorded.
+  An init script that clears `dependencyResolutionManagement.repositories` and re-adds
+  `https://maven-central.storage-download.googleapis.com/maven2/` first, plus
+  `robolectric.dependency.repo.url` on every `Test` task, resolves it; one `--refresh-dependencies`
+  pass is needed to move the cached resolution off the failing repository.

@@ -64,13 +64,24 @@ class FileDiagnosticHistory(private val context: Context) : LocalDiagnosticHisto
             // scan's own try block, so an exception escaping here used to discard a scan that had
             // already finished — the user was told "Scan failed" and got no report at all, because
             // the one thing that failed was the index entry listing it. A store that cannot take
-            // the index now degrades to "this scan is not listed" instead. Pruning stays correct:
-            // `kept` is the previous entries plus this one, so it can only be a superset of what
-            // the index on disk still points at.
-            runCatching { writeIndex(kept) }
+            // the index now degrades to "this scan is not listed" instead.
+            //
+            // That degradation is only honest while the prune below follows the index that is
+            // actually on disk. `kept` is the previous entries plus this one, truncated to
+            // MAX_INDEX_ENTRIES, so it is *not* a superset of `previous` once the store is full:
+            // on the save that pushes a fifty-first entry in, the entry that falls off the end is
+            // pruned together with its document, while an index write that failed leaves the older
+            // index still naming it. The result is a History row that opens to nothing, and it is
+            // permanent — the next save reads that index and writes the entry back verbatim, and
+            // `pruneReports` has no file left to remove (the same dead-entry state YY1 records for
+            // a failed document write, reached from the other side). So the prune below runs only
+            // against an index that was actually written; when the write failed, nothing is pruned
+            // at all, which is also what keeps the report this save just wrote — an orphan with no
+            // entry pointing at it, for the next successful save to account for (T1).
+            val indexed = runCatching { writeIndex(kept) }.isSuccess
             // Reports that fell out of the index can no longer be opened from the History screen,
             // so drop their files as well; otherwise app-private storage grows without bound.
-            runCatching { pruneReports(kept, indexReadable = previous != null) }
+            runCatching { pruneReports(kept, indexReadable = previous != null && indexed) }
             entry
         }
 

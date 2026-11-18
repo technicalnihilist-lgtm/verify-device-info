@@ -132,6 +132,30 @@ class HistoryIndexFailureTest {
     }
 
     @Test
+    fun `a failed index write never prunes a report the surviving index still names`() = runBlocking {
+        val template = report()
+        // Fill the index to its fifty-entry cap, so the next save has to drop the oldest entry.
+        repeat(50) { history.save(template, reportPath = null) }
+        val listed = history.list().map { it.id }
+        assertEquals("the store did not fill to its cap", 50, listed.size)
+
+        blockIndexWrite()
+        history.save(template, reportPath = null)
+
+        // The index on disk is the one written by the fifty earlier saves, and it still names every
+        // one of them, so every one of them must still open. `kept` is truncated to the cap and is
+        // therefore not a superset of that index: pruning against it deleted the oldest report while
+        // the surviving index kept naming it, which is a History row that expands to nothing.
+        assertEquals(listed, history.list().map { it.id })
+        listed.forEach { id ->
+            assertNotNull(
+                "the report the surviving index still names was pruned",
+                history.loadRaw(id)
+            )
+        }
+    }
+
+    @Test
     fun `a later save recovers and prunes the orphaned report`() = runBlocking {
         val first = history.save(report(), reportPath = null)
         blockIndexWrite()
