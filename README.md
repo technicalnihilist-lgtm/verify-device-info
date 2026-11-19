@@ -2,11 +2,11 @@
 
 <img src="assets/icon.png" width="96" height="96" alt="Verify Device Info icon">
 
-<img src="assets/banner.svg" alt="Verify Device Info — honest Android device inspection: specs, authenticity indicators, parts…">
+<img src="assets/banner.svg" alt="Verify Device Info">
 
 <a href="https://github.com/technicalnihilist-lgtm/verify-device-info/stargazers"><img src="https://img.shields.io/badge/stars-1-5A31F4?style=for-the-badge&logo=github&logoColor=white" alt="stars: 1"></a>&nbsp;<a href="https://github.com/technicalnihilist-lgtm/verify-device-info/network/members"><img src="https://img.shields.io/badge/forks-0-3FB950?style=for-the-badge" alt="forks: 0"></a>
 
-<a href="https://github.com/technicalnihilist-lgtm/verify-device-info/releases/latest"><img src="https://img.shields.io/badge/DOWNLOAD-APK-6D5AE6?style=for-the-badge&logo=android&logoColor=white" alt="Download APK"></a>
+<a href="https://github.com/technicalnihilist-lgtm/verify-device-info/releases/latest/download/VerifyDeviceInfo-1.0.0-release.apk"><img src="https://img.shields.io/badge/DOWNLOAD-APK-6D5AE6?style=for-the-badge&logo=android&logoColor=white" alt="Download APK"></a> <a href="https://technicalnihilist-lgtm.github.io/apps-site/apps/verify-device-info.html"><img src="https://img.shields.io/badge/WEBSITE-OPEN-3B82F6?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Website"></a>
 
 <b>Support the work</b>
 
